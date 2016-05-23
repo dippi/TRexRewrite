@@ -1,0 +1,5 @@
+[package]
+name = "trex"
+version = "0.1.0"
+
+[dependencies]
