@@ -111,7 +111,7 @@ pub type EventsIterator<'a> = Box<ClonableIterator<'a, Item = &'a Rc<Event>> + '
 
 pub trait Listener {
     fn receive(&mut self, event: &Rc<Event>);
-    fn receive_all<'a>(&mut self, events: EventsIterator<'a>) {
+    fn receive_all(&mut self, events: EventsIterator) {
         for event in events {
             self.receive(event);
         }
@@ -122,7 +122,7 @@ pub trait Engine {
     fn declare(&mut self, tuple: TupleDeclaration);
     fn define(&mut self, rule: Rule);
     fn publish(&mut self, event: &Rc<Event>);
-    fn publish_all<'a>(&mut self, events: EventsIterator<'a>) {
+    fn publish_all(&mut self, events: EventsIterator) {
         for event in events {
             self.publish(event);
         }

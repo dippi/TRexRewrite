@@ -6,7 +6,7 @@ use tesla::expressions::{BasicType, Value};
 use tesla::predicates::Aggregator;
 
 fn compute_average<'a, T, U>(iterator: T,
-                             attributes: &Vec<AttributeDeclaration>,
+                             attributes: &[AttributeDeclaration],
                              attr: usize)
                              -> Option<Value>
     where T: Iterator<Item = &'a U>,
@@ -28,7 +28,7 @@ fn compute_average<'a, T, U>(iterator: T,
 }
 
 fn compute_sum<'a, T, U>(iterator: T,
-                         attributes: &Vec<AttributeDeclaration>,
+                         attributes: &[AttributeDeclaration],
                          attr: usize)
                          -> Option<Value>
     where T: Iterator<Item = &'a U>,
@@ -48,7 +48,7 @@ fn compute_sum<'a, T, U>(iterator: T,
 }
 
 fn compute_min<'a, T, U>(iterator: T,
-                         attributes: &Vec<AttributeDeclaration>,
+                         attributes: &[AttributeDeclaration],
                          attr: usize)
                          -> Option<Value>
     where T: Iterator<Item = &'a U>,
@@ -69,7 +69,7 @@ fn compute_min<'a, T, U>(iterator: T,
 }
 
 fn compute_max<'a, T, U>(iterator: T,
-                         attributes: &Vec<AttributeDeclaration>,
+                         attributes: &[AttributeDeclaration],
                          attr: usize)
                          -> Option<Value>
     where T: Iterator<Item = &'a U>,
@@ -91,16 +91,16 @@ fn compute_max<'a, T, U>(iterator: T,
 
 pub fn compute_aggregate<'a, T, U>(aggregator: &Aggregator,
                                    iterator: T,
-                                   attributes: &Vec<AttributeDeclaration>)
+                                   attributes: &[AttributeDeclaration])
                                    -> Option<Value>
     where T: Iterator<Item = &'a U>,
           U: Deref<Target = Event> + 'a
 {
-    match aggregator {
-        &Aggregator::Avg(attr) => compute_average(iterator, attributes, attr),
-        &Aggregator::Sum(attr) => compute_sum(iterator, attributes, attr),
-        &Aggregator::Min(attr) => compute_min(iterator, attributes, attr),
-        &Aggregator::Max(attr) => compute_max(iterator, attributes, attr),
-        &Aggregator::Count => Some(Value::from(iterator.count() as i32)),
+    match *aggregator {
+        Aggregator::Avg(attr) => compute_average(iterator, attributes, attr),
+        Aggregator::Sum(attr) => compute_sum(iterator, attributes, attr),
+        Aggregator::Min(attr) => compute_min(iterator, attributes, attr),
+        Aggregator::Max(attr) => compute_max(iterator, attributes, attr),
+        Aggregator::Count => Some(Value::from(iterator.count() as i32)),
     }
 }

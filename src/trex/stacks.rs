@@ -12,13 +12,13 @@ fn ptr_eq<T>(a: *const T, b: *const T) -> bool {
     a == b
 }
 
-trait EventProcessor {
+pub trait EventProcessor {
     fn process(&mut self, event: &Rc<Event>);
     fn consume(&mut self, event: &Rc<Event>);
 }
 
-trait Evaluator {
-    fn evaluate<'a>(&'a self, context: &'a CompleteContext<'a>) -> Vec<PartialResult>;
+pub trait Evaluator {
+    fn evaluate(&self, context: &CompleteContext) -> Vec<PartialResult>;
 }
 
 #[derive(Clone, Debug)]
@@ -129,14 +129,14 @@ impl Evaluator for Stack {
 
         match self.predicate.ty {
             PredicateType::Event { ref selection, .. } => {
-                let map_res = |evt: &Rc<Event>| context.get_result().clone().push_event(&evt);
+                let map_res = |evt: &Rc<Event>| context.get_result().clone().push_event(evt);
                 let mut iterator = self.events.iter();
-                match selection {
-                    &EventSelection::Each => iterator.filter(check_evt).map(map_res).collect(),
-                    &EventSelection::First => {
+                match *selection {
+                    EventSelection::Each => iterator.filter(check_evt).map(map_res).collect(),
+                    EventSelection::First => {
                         iterator.find(check_evt).map(map_res).into_iter().collect()
                     }
-                    &EventSelection::Last => {
+                    EventSelection::Last => {
                         iterator.rev().find(check_evt).map(map_res).into_iter().collect()
                     }
                 }
@@ -206,7 +206,7 @@ impl RuleStacks {
         let mut oldest_times = once((0, *trigger_time)).collect::<HashMap<_, _>>();
         for (&i, stack) in &mut self.stacks {
             let prev = oldest_times[&stack.timing.upper];
-            let time = stack.remove_old_events(&prev).unwrap_or_else(|| trigger_time.clone());
+            let time = stack.remove_old_events(&prev).unwrap_or_else(|| *trigger_time);
             oldest_times.insert(i, time);
         }
     }
@@ -225,7 +225,7 @@ impl RuleStacks {
             })
     }
 
-    fn generate_events(&self, event: &Rc<Event>, results: &Vec<PartialResult>) -> Vec<Rc<Event>> {
+    fn generate_events(&self, event: &Rc<Event>, results: &[PartialResult]) -> Vec<Rc<Event>> {
         results.iter()
             .map(|res| {
                 let context = CompleteContext::new(self.rule.predicates(), res);

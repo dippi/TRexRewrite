@@ -10,6 +10,7 @@ use std::rc::Rc;
 use std::collections::HashMap;
 use self::stacks::*;
 
+#[derive(Default)]
 pub struct TRex {
     tuples: HashMap<usize, TupleDeclaration>,
     stacks: Vec<RuleStacks>,
@@ -19,12 +20,7 @@ pub struct TRex {
 
 impl TRex {
     pub fn new() -> TRex {
-        TRex {
-            tuples: HashMap::new(),
-            stacks: Vec::new(),
-            listeners: HashMap::new(),
-            last_id: 0,
-        }
+        TRex::default()
     }
 }
 
@@ -65,5 +61,6 @@ impl Engine for TRex {
 pub type TuplesIterator<'a> = Box<ClonableIterator<'a, Item = &'a Rc<Tuple>> + 'a>;
 
 trait Driver {
+    // fn new(predicate: &Predicate, tuple: &TupleDeclaration) -> Self;
     fn evaluate<'a>(&mut self, context: ()) -> TuplesIterator<'a>;
 }

@@ -74,16 +74,16 @@ pub enum Expression {
 
 impl Value {
     pub fn extract_int(&self) -> i32 {
-        if let &Value::Int(value) = self { value } else { panic!("Wrong Value unwrap") }
+        if let Value::Int(value) = *self { value } else { panic!("Wrong Value unwrap") }
     }
     pub fn extract_float(&self) -> f32 {
-        if let &Value::Float(value) = self { value } else { panic!("Wrong Value unwrap") }
+        if let Value::Float(value) = *self { value } else { panic!("Wrong Value unwrap") }
     }
     pub fn extract_bool(&self) -> bool {
-        if let &Value::Bool(value) = self { value } else { panic!("Wrong Value unwrap") }
+        if let Value::Bool(value) = *self { value } else { panic!("Wrong Value unwrap") }
     }
     pub fn extract_string(&self) -> String {
-        if let &Value::Str(ref value) = self { value.clone() } else { panic!("Wrong Value unwrap") }
+        if let Value::Str(ref value) = *self { value.clone() } else { panic!("Wrong Value unwrap") }
     }
 }
 

@@ -15,17 +15,18 @@ impl Value {
         }
     }
     pub fn as_bool(&self) -> Option<bool> {
-        if let &Value::Bool(value) = self { Some(value) } else { None }
+        if let Value::Bool(value) = *self { Some(value) } else { None }
     }
 }
 
 impl Expression {
     pub fn is_local(&self) -> bool {
-        match self {
-            &Expression::Parameter { .. } => false,
-            &Expression::Cast { ref expression, .. } |
-            &Expression::UnaryOperation { ref expression, .. } => expression.is_local(),
-            &Expression::BinaryOperation { ref left, ref right, .. } => {
+        // TODO maybe take into account local parameters that don't alter expression locality
+        match *self {
+            Expression::Parameter { .. } => false,
+            Expression::Cast { ref expression, .. } |
+            Expression::UnaryOperation { ref expression, .. } => expression.is_local(),
+            Expression::BinaryOperation { ref left, ref right, .. } => {
                 left.is_local() && right.is_local()
             }
             _ => true,
@@ -88,20 +89,20 @@ pub trait EvaluationContext {
     fn evaluate_parameter(&self, predicate: usize, parameter: usize) -> Value;
 
     fn evaluate_expression(&self, expression: &Expression) -> Value {
-        match expression {
-            &Expression::Immediate { ref value } => value.clone(),
-            &Expression::Reference { attribute } => self.get_attribute(attribute),
-            &Expression::Aggregate => self.get_aggregate(),
-            &Expression::Parameter { predicate, parameter } => {
+        match *expression {
+            Expression::Immediate { ref value } => value.clone(),
+            Expression::Reference { attribute } => self.get_attribute(attribute),
+            Expression::Aggregate => self.get_aggregate(),
+            Expression::Parameter { predicate, parameter } => {
                 self.evaluate_parameter(predicate, parameter)
             }
-            &Expression::Cast { ref ty, ref expression } => {
+            Expression::Cast { ref ty, ref expression } => {
                 self.evaluate_expression(expression).cast(ty)
             }
-            &Expression::UnaryOperation { ref operator, ref expression } => {
+            Expression::UnaryOperation { ref operator, ref expression } => {
                 unary::apply(operator, &self.evaluate_expression(expression))
             }
-            &Expression::BinaryOperation { ref operator, ref left, ref right } => {
+            Expression::BinaryOperation { ref operator, ref left, ref right } => {
                 binary::apply(operator,
                               &self.evaluate_expression(left),
                               &self.evaluate_expression(right))
@@ -137,14 +138,14 @@ impl<'a> EvaluationContext for SimpleContext<'a> {
 
 #[derive(Clone, Debug)]
 pub struct CompleteContext<'a> {
-    predicates: &'a Vec<Predicate>,
+    predicates: &'a [Predicate],
     result: &'a PartialResult,
     current: usize,
     tuple: Option<&'a Tuple>,
 }
 
 impl<'a> CompleteContext<'a> {
-    pub fn new(predicates: &'a Vec<Predicate>, result: &'a PartialResult) -> Self {
+    pub fn new(predicates: &'a [Predicate], result: &'a PartialResult) -> Self {
         CompleteContext {
             predicates: predicates,
             result: result,
