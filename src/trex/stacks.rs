@@ -4,8 +4,7 @@ use tesla::predicates::*;
 use std::rc::Rc;
 use std::cmp::Ordering as CmpOrd;
 use std::collections::{BTreeMap, HashMap};
-use std::iter::{FromIterator, IntoIterator, once};
-use chrono::{DateTime, Duration, UTC};
+use chrono::{DateTime, UTC};
 use trex::expressions::*;
 use trex::aggregators::compute_aggregate;
 
@@ -19,7 +18,7 @@ pub trait EventProcessor {
 }
 
 pub trait Evaluator {
-    fn evaluate(&self, context: &CompleteContext) -> Vec<PartialResult>;
+    fn evaluate(&self, result: &PartialResult) -> Vec<PartialResult>;
 }
 
 #[derive(Clone, Debug)]
@@ -32,18 +31,36 @@ impl Trigger {
         Trigger { predicate: predicate.clone() }
     }
 
-    pub fn is_satisfied(&self, event: &Rc<Event>) -> bool {
-        event.tuple.ty_id == self.predicate.tuple.ty_id &&
-        {
-            let context = SimpleContext::new(&event.tuple);
-            let check_expr = |expr: &Rc<_>| context.evaluate_expression(expr).as_bool().unwrap();
-            self.predicate.tuple.constraints.iter().all(check_expr)
+    pub fn is_satisfied(&self, context: &CompleteContext) -> bool {
+        let check_expr = |expr: &Rc<_>| context.evaluate_expression(expr).as_bool().unwrap();
+        self.predicate.tuple.constraints.iter().all(check_expr)
+    }
+
+    pub fn evaluate(&self, event: &Rc<Event>) -> Option<PartialResult> {
+        if event.tuple.ty_id == self.predicate.tuple.ty_id {
+            let res = if let PredicateType::Trigger { ref parameters } = self.predicate.ty {
+                parameters.iter().enumerate().fold(PartialResult::new(), |res, (i, param)| {
+                    let val = CompleteContext::new(&res, &event.tuple)
+                        .evaluate_expression(&param.expression);
+                    res.insert_parameter((0, i), val)
+                })
+            } else {
+                panic!("Unexpected predicate type")
+            };
+            if self.is_satisfied(&CompleteContext::new(&res, &event.tuple)) {
+                Some(res.insert_event(0, event.clone()))
+            } else {
+                None
+            }
+        } else {
+            None
         }
     }
 }
 
 #[derive(Clone, Debug)]
 struct Stack {
+    idx: usize,
     tuple: TupleDeclaration,
     predicate: Predicate,
     local_exprs: Vec<Rc<Expression>>,
@@ -53,7 +70,7 @@ struct Stack {
 }
 
 impl Stack {
-    fn new(tuple: &TupleDeclaration, predicate: &Predicate) -> Option<Stack> {
+    fn new(idx: usize, tuple: &TupleDeclaration, predicate: &Predicate) -> Option<Stack> {
         match predicate.ty {
             PredicateType::Event { ref timing, .. } |
             PredicateType::EventAggregate { ref timing, .. } |
@@ -65,6 +82,7 @@ impl Stack {
                     .partition(|expr| expr.is_local());
 
                 Some(Stack {
+                    idx: idx,
                     tuple: tuple.clone(),
                     predicate: predicate.clone(),
                     local_exprs: local_exprs,
@@ -134,51 +152,66 @@ impl EventProcessor for Stack {
 }
 
 impl Evaluator for Stack {
-    fn evaluate(&self, context: &CompleteContext) -> Vec<PartialResult> {
-        let result = context.get_result();
-        let upper = result.get_time(self.timing.upper);
-        let lower = match self.timing.bound {
-            TimingBound::Within { window } => upper - window,
+    fn evaluate(&self, result: &PartialResult) -> Vec<PartialResult> {
+        let upper_time = result.get_time(self.timing.upper);
+        let lower_time = match self.timing.bound {
+            TimingBound::Within { window } => upper_time - window,
             TimingBound::Between { lower } => result.get_time(lower),
         };
 
-        let check_evt = |evt: &&Rc<Event>| {
-            // TODO think about interval (open vs close)
-            evt.time < upper && evt.time >= lower &&
-            self.is_globally_satisfied(&context.clone().set_tuple(&evt.tuple))
-        };
+        let upper = self.events
+            .binary_search_by(|evt| {
+                if evt.time < upper_time { CmpOrd::Less } else { CmpOrd::Greater }
+            })
+            .unwrap_err();
+        let lower = self.events
+            .binary_search_by(|evt| {
+                if evt.time < lower_time { CmpOrd::Less } else { CmpOrd::Greater }
+            })
+            .unwrap_err();
 
-        // TODO maybe improve time bounds with binary search
-        let mut iterator = self.events.iter();
+        let mut iterator = self.events[lower..upper].iter();
 
         match self.predicate.ty {
-            PredicateType::Event { ref selection, .. } => {
-                let map_res = |evt: &Rc<Event>| context.get_result().clone().push_event(evt);
+            PredicateType::Event { ref selection, ref parameters, .. } => {
+                let filter_map = |evt: &Rc<Event>| {
+                    let res =
+                        parameters.iter().enumerate().fold(result.clone(), |res, (i, param)| {
+                            let val = CompleteContext::new(&res, &evt.tuple)
+                                .evaluate_expression(&param.expression);
+                            res.insert_parameter((self.idx, i), val)
+                        });
+                    if self.is_globally_satisfied(&CompleteContext::new(&res, &evt.tuple)) {
+                        Some(res.insert_event(self.idx, evt.clone()))
+                    } else {
+                        None
+                    }
+                };
                 match *selection {
-                    EventSelection::Each => iterator.filter(check_evt).map(map_res).collect(),
-                    EventSelection::First => {
-                        iterator.find(check_evt).map(map_res).into_iter().collect()
-                    }
-                    EventSelection::Last => {
-                        iterator.rev().find(check_evt).map(map_res).into_iter().collect()
-                    }
+                    EventSelection::Each => iterator.filter_map(filter_map).collect(),
+                    EventSelection::First => iterator.filter_map(filter_map).take(1).collect(),
+                    EventSelection::Last => iterator.rev().filter_map(filter_map).take(1).collect(),
                 }
             }
-            PredicateType::EventAggregate { ref aggregator, .. } => {
-                let map_res = |res: Value| context.get_result().clone().push_aggregate(res);
-                compute_aggregate(aggregator,
-                                  iterator.filter(check_evt),
-                                  &self.tuple.attributes)
-                    .map(map_res)
+            PredicateType::EventAggregate { ref aggregator, ref parameter, .. } => {
+                let check = |evt: &&Rc<Event>| {
+                    self.is_globally_satisfied(&CompleteContext::new(result, &evt.tuple))
+                };
+                let map = |aggr: Value| {
+                    let context = CompleteContext::new(result, &aggr);
+                    let val = context.evaluate_expression(&parameter.expression);
+                    result.clone().insert_parameter((self.idx, 0), val)
+                };
+                compute_aggregate(aggregator, iterator.filter(check), &self.tuple.attributes)
+                    .map(map)
                     .into_iter()
                     .collect()
             }
             PredicateType::EventNegation { .. } => {
-                if !iterator.any(|evt| check_evt(&evt)) {
-                    vec![context.get_result().clone()]
-                } else {
-                    Vec::new()
-                }
+                let check = |evt: &Rc<Event>| {
+                    self.is_globally_satisfied(&CompleteContext::new(&result, &evt.tuple))
+                };
+                if !iterator.any(check) { vec![result.clone()] } else { Vec::new() }
             }
             _ => panic!("Wrong event stack evaluation"),
         }
@@ -201,7 +234,7 @@ impl RuleStacks {
             let stacks = predicates.iter()
                 .enumerate()
                 .filter_map(|(i, pred)| {
-                    Stack::new(&declarations[&pred.tuple.ty_id], pred).map(|stack| (i, stack))
+                    Stack::new(i, &declarations[&pred.tuple.ty_id], pred).map(|stack| (i, stack))
                 })
                 .collect::<BTreeMap<usize, Stack>>();
 
@@ -224,16 +257,11 @@ impl RuleStacks {
         }
     }
 
-    fn get_partial_results(&self, event: &Rc<Event>) -> Vec<PartialResult> {
-        let initial = PartialResult::with_trigger(event);
+    fn get_partial_results(&self, initial: PartialResult) -> Vec<PartialResult> {
         self.stacks
             .iter()
             .fold(vec![initial], |previous, (_, stack)| {
-                previous.iter()
-                    .flat_map(|res| {
-                        stack.evaluate(&CompleteContext::new(self.rule.predicates(), res))
-                    })
-                    .collect()
+                previous.iter().flat_map(|res| stack.evaluate(res)).collect()
                 // TODO maybe interrupt fold if prev is empty (combo scan + take_while + last)
             })
     }
@@ -241,7 +269,7 @@ impl RuleStacks {
     fn generate_events(&self, event: &Rc<Event>, results: &[PartialResult]) -> Vec<Rc<Event>> {
         results.iter()
             .map(|res| {
-                let context = CompleteContext::new(self.rule.predicates(), res);
+                let context = CompleteContext::new(res, ());
                 let template = self.rule.event_template();
                 Rc::new(Event {
                     tuple: Tuple {
@@ -262,10 +290,9 @@ impl RuleStacks {
             stack.process(event);
         }
 
-        if self.trigger.is_satisfied(event) {
+        if let Some(initial) = self.trigger.evaluate(event) {
             self.remove_old_events(&event.time);
-            // TODO maybe work directly with contexts instead of partial results
-            let partial_results = self.get_partial_results(event);
+            let partial_results = self.get_partial_results(initial);
             // TODO filter for where clause
             // TODO consuming clause
             self.generate_events(event, &partial_results)

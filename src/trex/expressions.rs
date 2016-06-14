@@ -1,8 +1,6 @@
 use tesla::*;
 use tesla::expressions::*;
-use tesla::predicates::*;
 use chrono::{DateTime, UTC};
-use owning_ref::{ErasedRcRef, RcRef};
 use std::collections::HashMap;
 use std::rc::Rc;
 use trex::operations::*;
@@ -36,48 +34,30 @@ impl Expression {
 
 #[derive(Clone, Debug)]
 pub struct PartialResult {
-    tuples: HashMap<usize, ErasedRcRef<Tuple>>,
-    aggregates: HashMap<usize, Value>,
-    times: HashMap<usize, DateTime<UTC>>,
-    len: usize,
+    parameters: HashMap<(usize, usize), Value>,
+    events: HashMap<usize, Rc<Event>>,
 }
 
 impl PartialResult {
     pub fn new() -> Self {
         PartialResult {
-            tuples: HashMap::new(),
-            aggregates: HashMap::new(),
-            times: HashMap::new(),
-            len: 0,
+            parameters: HashMap::new(),
+            events: HashMap::new(),
         }
     }
 
-    pub fn with_trigger(trigger: &Rc<Event>) -> Self {
-        PartialResult::new().push_event(trigger)
-    }
-
-    pub fn push_event(mut self, event: &Rc<Event>) -> Self {
-        let tuple = RcRef::new(event.clone()).map(|evt| &evt.tuple).erase_owner();
-        self.tuples.insert(self.len, tuple);
-        self.times.insert(self.len, event.time);
-        self.len += 1;
+    pub fn insert_event(mut self, idx: usize, event: Rc<Event>) -> Self {
+        self.events.insert(idx, event);
         self
     }
 
-    pub fn push_tuple(mut self, tuple: &Rc<Tuple>) -> Self {
-        self.tuples.insert(self.len, RcRef::new(tuple.clone()).erase_owner());
-        self.len += 1;
-        self
-    }
-
-    pub fn push_aggregate(mut self, aggregate: Value) -> Self {
-        self.aggregates.insert(self.len, aggregate);
-        self.len += 1;
+    pub fn insert_parameter(mut self, idx: (usize, usize), parameter: Value) -> Self {
+        self.parameters.insert(idx, parameter);
         self
     }
 
     pub fn get_time(&self, index: usize) -> DateTime<UTC> {
-        self.times[&index]
+        self.events[&index].time
     }
 }
 
@@ -86,7 +66,7 @@ pub trait EvaluationContext {
 
     fn get_aggregate(&self) -> Value;
 
-    fn evaluate_parameter(&self, predicate: usize, parameter: usize) -> Value;
+    fn get_parameter(&self, predicate: usize, parameter: usize) -> Value;
 
     fn evaluate_expression(&self, expression: &Expression) -> Value {
         match *expression {
@@ -94,7 +74,7 @@ pub trait EvaluationContext {
             Expression::Reference { attribute } => self.get_attribute(attribute),
             Expression::Aggregate => self.get_aggregate(),
             Expression::Parameter { predicate, parameter } => {
-                self.evaluate_parameter(predicate, parameter)
+                self.get_parameter(predicate, parameter)
             }
             Expression::Cast { ref ty, ref expression } => {
                 self.evaluate_expression(expression).cast(ty)
@@ -131,66 +111,71 @@ impl<'a> EvaluationContext for SimpleContext<'a> {
         panic!("SimpleContext cannot retrieve aggregates");
     }
 
-    fn evaluate_parameter(&self, _: usize, _: usize) -> Value {
-        panic!("SimpleContext cannot evaluate parameters");
+    fn get_parameter(&self, _: usize, _: usize) -> Value {
+        panic!("SimpleContext cannot retrieve parameters");
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum CurrentValue<'a> {
+    Empty,
+    Aggr(&'a Value),
+    Tuple(&'a Tuple),
+}
+
+impl<'a> From<()> for CurrentValue<'a> {
+    fn from(_: ()) -> Self {
+        CurrentValue::Empty
+    }
+}
+
+impl<'a> From<&'a Value> for CurrentValue<'a> {
+    fn from(aggr: &'a Value) -> Self {
+        CurrentValue::Aggr(aggr)
+    }
+}
+
+impl<'a> From<&'a Tuple> for CurrentValue<'a> {
+    fn from(tuple: &'a Tuple) -> Self {
+        CurrentValue::Tuple(tuple)
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct CompleteContext<'a> {
-    predicates: &'a [Predicate],
     result: &'a PartialResult,
-    current: usize,
-    tuple: Option<&'a Tuple>,
+    current: CurrentValue<'a>,
 }
 
 impl<'a> CompleteContext<'a> {
-    pub fn new(predicates: &'a [Predicate], result: &'a PartialResult) -> Self {
+    pub fn new<T>(result: &'a PartialResult, current: T) -> Self
+        where T: Into<CurrentValue<'a>>
+    {
         CompleteContext {
-            predicates: predicates,
             result: result,
-            current: 0,
-            tuple: None,
+            current: current.into(),
         }
-    }
-
-    pub fn set_current(mut self, current: usize) -> Self {
-        self.current = current;
-        self.tuple = self.result.tuples.get(&current).map(|it| &**it);
-        self
-    }
-
-    pub fn set_tuple(mut self, tuple: &'a Tuple) -> Self {
-        self.tuple = Some(tuple);
-        self.current += 1;
-        self
-    }
-
-    pub fn get_result(&self) -> &PartialResult {
-        self.result
     }
 }
 
 impl<'a> EvaluationContext for CompleteContext<'a> {
     fn get_attribute(&self, attribute: usize) -> Value {
-        self.tuple.unwrap().data[attribute].clone()
+        if let CurrentValue::Tuple(tuple) = self.current {
+            tuple.data[attribute].clone()
+        } else {
+            panic!("Trying to get a tuple attribute on an aggregate")
+        }
     }
 
     fn get_aggregate(&self) -> Value {
-        self.result.aggregates[&self.current].clone()
+        if let CurrentValue::Aggr(aggr) = self.current {
+            aggr.clone()
+        } else {
+            panic!("Trying to get an aggregate attribute on a tuple")
+        }
     }
 
-    fn evaluate_parameter(&self, predicate: usize, parameter: usize) -> Value {
-        let expression = match self.predicates[predicate].ty {
-            PredicateType::Trigger { ref parameters } |
-            PredicateType::Event { ref parameters, .. } |
-            PredicateType::OrderdStatic { ref parameters, .. } |
-            PredicateType::UnorderedStatic { ref parameters } => &parameters[parameter].expression,
-            PredicateType::EventAggregate { ref parameter, .. } |
-            PredicateType::StaticAggregate { ref parameter, .. } => &parameter.expression,
-            _ => panic!("Wrong parameters evaluation"),
-        };
-
-        self.clone().set_current(predicate).evaluate_expression(expression)
+    fn get_parameter(&self, predicate: usize, parameter: usize) -> Value {
+        self.result.parameters[&(predicate, parameter)].clone()
     }
 }

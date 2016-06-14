@@ -1,5 +1,4 @@
 extern crate chrono;
-extern crate owning_ref;
 extern crate rusqlite;
 extern crate r2d2;
 extern crate r2d2_sqlite;

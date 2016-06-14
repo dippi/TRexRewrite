@@ -184,7 +184,7 @@ impl SQLiteDriver {
 }
 
 impl Evaluator for SQLiteDriver {
-    fn evaluate(&self, context: &CompleteContext) -> Vec<PartialResult> {
+    fn evaluate(&self, result: &PartialResult) -> Vec<PartialResult> {
         // TODO handle errors with Result<_, _>
         let conn = self.pool.get().unwrap();
         let stmt = conn.prepare_cached(&self.statement).unwrap();
