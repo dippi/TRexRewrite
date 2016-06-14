@@ -266,8 +266,10 @@ impl RuleStacks {
             })
     }
 
-    fn generate_events(&self, event: &Rc<Event>, results: &[PartialResult]) -> Vec<Rc<Event>> {
-        results.iter()
+    fn generate_events<'a, T>(&self, event: &Rc<Event>, results: T) -> Vec<Rc<Event>>
+        where T: IntoIterator<Item = &'a PartialResult>
+    {
+        results.into_iter()
             .map(|res| {
                 let context = CompleteContext::new(res, ());
                 let template = self.rule.event_template();
@@ -293,9 +295,16 @@ impl RuleStacks {
         if let Some(initial) = self.trigger.evaluate(event) {
             self.remove_old_events(&event.time);
             let partial_results = self.get_partial_results(initial);
-            // TODO filter for where clause
+            // TODO move filter as early as possible in the partial_results generation
+            let filtered = partial_results.iter().filter(|res| {
+                let context = CompleteContext::new(res, ());
+                self.rule
+                    .filters()
+                    .iter()
+                    .all(|expr| context.evaluate_expression(expr).as_bool().unwrap())
+            });
             // TODO consuming clause
-            self.generate_events(event, &partial_results)
+            self.generate_events(event, filtered)
         } else {
             Vec::new()
         }
