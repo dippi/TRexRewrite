@@ -3,6 +3,7 @@ mod aggregators;
 mod stacks;
 mod operations;
 mod sqldriver;
+mod typeinference;
 
 use tesla::{Engine, Event, Listener, Rule, TupleDeclaration};
 use std::collections::{BTreeMap, HashMap};
@@ -13,7 +14,8 @@ use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use threadpool::ThreadPool;
 use fnv::FnvHasher;
-use self::stacks::*;
+use trex::typeinference::check_rule;
+use trex::stacks::*;
 
 pub type FnvHashMap<K, V> = HashMap<K, V, BuildHasherDefault<FnvHasher>>;
 
@@ -48,10 +50,9 @@ impl Engine for TRex {
         }
     }
     fn define(&mut self, rule: Rule) {
-        // TODO check for rule validity
-        // (predicates type and tuple they refers to,
-        // expressions refereces ranges and types,
-        // emit complete assignment and correct types)
+        // TODO handle error with result
+        check_rule(&rule, &self.tuples).unwrap();
+
         let mut pred_ty_ids =
             rule.predicates.iter().map(|pred| pred.tuple.ty_id).collect::<Vec<_>>();
         pred_ty_ids.sort();
