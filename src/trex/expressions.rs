@@ -3,6 +3,7 @@ use tesla::expressions::*;
 use chrono::{DateTime, UTC};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::cmp::max;
 use trex::operations::*;
 
 impl Value {
@@ -28,6 +29,21 @@ impl Expression {
                 left.is_local() && right.is_local()
             }
             _ => true,
+        }
+    }
+
+    pub fn get_last_predicate(&self) -> Option<usize> {
+        match *self {
+            Expression::Parameter { predicate, .. } => Some(predicate),
+            Expression::Cast { ref expression, .. } |
+            Expression::UnaryOperation { ref expression, .. } => expression.get_last_predicate(),
+            Expression::BinaryOperation { ref left, ref right, .. } => {
+                match (left.get_last_predicate(), right.get_last_predicate()) {
+                    (Some(lpred), Some(rpred)) => Some(max(lpred, rpred)),
+                    (lpred, rpred) => lpred.or(rpred),
+                }
+            }
+            _ => None,
         }
     }
 }
