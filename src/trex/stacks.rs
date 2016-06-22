@@ -4,7 +4,7 @@ use tesla::predicates::*;
 use std::f32;
 use std::rc::Rc;
 use std::collections::{BTreeMap, HashMap};
-use std::iter::{FromIterator, IntoIterator};
+use std::iter::{FromIterator, IntoIterator, once};
 use std::ops::Add;
 use chrono::{DateTime, Duration, UTC};
 use trex::expressions::*;
@@ -49,7 +49,6 @@ struct Stack {
     local_exprs: Vec<Rc<Expression>>,
     global_exprs: Vec<Rc<Expression>>,
     timing: Timing,
-    loopback: Vec<usize>,
     max_window: Duration,
     events: Vec<Rc<Event>>, // TODO shortcuts for dependencies and stuff
 }
@@ -72,7 +71,6 @@ impl Stack {
                     local_exprs: local_exprs,
                     global_exprs: global_exprs,
                     timing: timing.clone(),
-                    loopback: Vec::new(),
                     max_window: Duration::seconds(0),
                     events: Vec::new(),
                 })
@@ -95,9 +93,10 @@ impl Stack {
         self.global_exprs.iter().all(check_expr)
     }
 
-    fn remove_old_events(&mut self, time: Option<DateTime<UTC>>) {
-        // TODO implement
-        unimplemented!();
+    fn remove_old_events(&mut self, time: &DateTime<UTC>) -> Option<DateTime<UTC>> {
+        // TODO reason on interval (open vs close)
+        self.events.retain(|evt| &evt.time >= time);
+        self.events.first().map(|evt| evt.time)
     }
 
     fn compute_aggregate<'b, T>(&self, aggregator: &Aggregator, iterator: T) -> Option<Value>
@@ -245,7 +244,18 @@ impl RuleStacks {
                 })
                 .collect::<BTreeMap<usize, Stack>>();
 
-            // TODO insert into the stack the missing info
+            let windows = stacks.iter()
+                .map(|(_, stack)| {
+                    match stack.timing.bound {
+                        TimingBound::Within { window } => window,
+                        TimingBound::Between { lower } => stacks[&lower].max_window,
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            for (i, (_, stack)) in stacks.iter_mut().enumerate() {
+                stack.max_window = windows[i];
+            }
 
             (trigger, stacks)
         };
@@ -257,12 +267,23 @@ impl RuleStacks {
         }
     }
 
+    fn remove_old_events(&mut self, trigger_time: &DateTime<UTC>) {
+        let mut oldest_times = once((0, *trigger_time)).collect::<HashMap<_, _>>();
+        for (&i, stack) in &mut self.stacks {
+            let prev = oldest_times[&stack.timing.upper];
+            let time = stack.remove_old_events(&prev).unwrap_or_else(|| trigger_time.clone());
+            oldest_times.insert(i, time);
+        }
+    }
+
     pub fn process(&mut self, event: &Rc<Event>) -> Vec<Rc<Event>> {
         for (_, stack) in &mut self.stacks {
             stack.process(event);
         }
 
         if self.trigger.is_satisfied(event) {
+            self.remove_old_events(&event.time);
+
             let initial = PartialResult::with_trigger(event);
             let mut previous = vec![initial];
             for (_, stack) in &mut self.stacks {
