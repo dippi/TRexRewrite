@@ -1,5 +1,3 @@
-mod operations;
-
 use tesla::*;
 use tesla::expressions::*;
 use tesla::predicates::*;
@@ -7,7 +5,7 @@ use chrono::{DateTime, UTC};
 use owning_ref::{ErasedRcRef, RcRef};
 use std::collections::HashMap;
 use std::rc::Rc;
-use self::operations::*;
+use trex::operations::*;
 
 impl Value {
     fn cast(&self, ty: &BasicType) -> Value {

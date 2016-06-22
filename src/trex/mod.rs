@@ -1,6 +1,7 @@
 mod expressions;
 mod aggregators;
 mod stacks;
+mod operations;
 mod sqldriver;
 
 use tesla::{ClonableIterator, Engine, Event, EventsIterator, Listener, Rule, Tuple,
