@@ -17,7 +17,7 @@ pub enum Aggregator {
     Sum(usize),
     Max(usize),
     Min(usize),
-    Count,
+    Count, // TODO add ANY and ALL?
 }
 
 #[derive(Clone, Debug)]
@@ -27,15 +27,19 @@ pub struct ParameterDeclaration {
 }
 
 #[derive(Clone, Debug)]
-pub enum Timing {
+pub enum TimingBound {
     Within {
-        event: usize,
-        time: Duration,
+        window: Duration,
     },
     Between {
-        first: usize,
-        last: usize,
+        lower: usize,
     },
+}
+
+#[derive(Clone, Debug)]
+pub struct Timing {
+    pub upper: usize,
+    pub bound: TimingBound,
 }
 
 #[derive(Clone, Debug)]

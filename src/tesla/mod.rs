@@ -37,95 +37,43 @@ pub struct EventTemplate {
     pub attributes: Vec<Expression>,
 }
 
-// TODO maybe refactor Rule fields names
-// (sometimes they conflict with common traits or language words)
-// Maybe: predicates, filters, event_template and consuming
-
 #[derive(Clone, Debug)]
 pub struct Rule {
-    from: Vec<Predicate>,
-    when: Vec<Expression>,
-    emit: EventTemplate,
+    predicates: Vec<Predicate>,
+    filters: Vec<Expression>,
+    event_template: EventTemplate,
     consuming: Vec<usize>,
 }
 
 impl Rule {
-    pub fn from(&self) -> &Vec<Predicate> {
-        &self.from
+    pub fn new(predicates: Vec<Predicate>,
+               filters: Vec<Expression>,
+               event_template: EventTemplate,
+               consuming: Vec<usize>)
+               -> Result<Rule, String> {
+        // TODO check for rule validity
+        // (Parameters definition and usage,
+        // aggregate expr can appear only
+        // in aggregate parameter definitions,
+        // and consuming ranges validity)
+        Ok(Rule {
+            predicates: predicates,
+            filters: filters,
+            event_template: event_template,
+            consuming: consuming,
+        })
     }
-    pub fn when(&self) -> &Vec<Expression> {
-        &self.when
+    pub fn predicates(&self) -> &Vec<Predicate> {
+        &self.predicates
     }
-    pub fn emit(&self) -> &EventTemplate {
-        &self.emit
+    pub fn filters(&self) -> &Vec<Expression> {
+        &self.filters
+    }
+    pub fn event_template(&self) -> &EventTemplate {
+        &self.event_template
     }
     pub fn consuming(&self) -> &Vec<usize> {
         &self.consuming
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct RuleBuilder {
-    from: Option<Vec<Predicate>>,
-    when: Option<Vec<Expression>>,
-    emit: Option<EventTemplate>,
-    consuming: Option<Vec<usize>>,
-}
-
-impl RuleBuilder {
-    pub fn new() -> RuleBuilder {
-        RuleBuilder {
-            from: None,
-            when: None,
-            emit: None,
-            consuming: None,
-        }
-    }
-    pub fn from_rule(rule: Rule) -> RuleBuilder {
-        // TODO implement trait From
-        RuleBuilder {
-            from: Some(rule.from),
-            when: Some(rule.when),
-            emit: Some(rule.emit),
-            consuming: Some(rule.consuming),
-        }
-    }
-    pub fn from(&mut self, predicates: Vec<Predicate>) -> &mut RuleBuilder {
-        self.from = Some(predicates);
-        self
-    }
-    pub fn when(&mut self, filters: Vec<Expression>) -> &mut RuleBuilder {
-        self.when = Some(filters);
-        self
-    }
-    pub fn emit(&mut self, template: EventTemplate) -> &mut RuleBuilder {
-        self.emit = Some(template);
-        self
-    }
-    pub fn consuming(&mut self, events: Vec<usize>) -> &mut RuleBuilder {
-        self.consuming = Some(events);
-        self
-    }
-    pub fn finalize(self) -> Result<Rule, String> {
-        if let RuleBuilder { from: Some(from),
-                             when: Some(when),
-                             emit: Some(emit),
-                             consuming: Some(consuming) } = self {
-            // TODO check for rule validity
-            // (Parameters definition and usage,
-            // aggregate expr can appear only
-            // in aggregate parameter definitions,
-            // and consuming ranges validity)
-            Ok(Rule {
-                from: from,
-                when: when,
-                emit: emit,
-                consuming: consuming,
-            })
-        } else {
-            // TODO improve error management
-            Err("Uncomplete!".to_owned())
-        }
     }
 }
 

@@ -16,6 +16,10 @@ pub enum Value {
     Str(String),
 }
 
+// TODO add a RawValue(i32, f32, bool, String)?
+// Paying a little cost in memory It would allow unchecked access to values
+// But for safety and ergonomy it could be easily converted to/from the Value enum.
+
 #[derive(Clone, Debug)]
 pub enum UnaryOperator {
     Minus,
@@ -33,7 +37,7 @@ pub enum BinaryOperator {
     GreaterThan,
     GreaterEqual,
     LowerThan,
-    LowerEqual,
+    LowerEqual, // TODO add Reminder
 }
 
 #[derive(Clone, Debug)]
@@ -64,4 +68,69 @@ pub enum Expression {
         left: Rc<Expression>,
         right: Rc<Expression>,
     },
+}
+
+// TODO think about utility of the following functions
+
+impl Value {
+    pub fn extract_int(&self) -> i32 {
+        if let &Value::Int(value) = self { value } else { panic!("Wrong Value unwrap") }
+    }
+    pub fn extract_float(&self) -> f32 {
+        if let &Value::Float(value) = self { value } else { panic!("Wrong Value unwrap") }
+    }
+    pub fn extract_bool(&self) -> bool {
+        if let &Value::Bool(value) = self { value } else { panic!("Wrong Value unwrap") }
+    }
+    pub fn extract_string(&self) -> String {
+        if let &Value::Str(ref value) = self { value.clone() } else { panic!("Wrong Value unwrap") }
+    }
+}
+
+impl From<i32> for Value {
+    fn from(val: i32) -> Self {
+        Value::Int(val)
+    }
+}
+
+impl From<f32> for Value {
+    fn from(val: f32) -> Self {
+        Value::Float(val)
+    }
+}
+
+impl From<bool> for Value {
+    fn from(val: bool) -> Self {
+        Value::Bool(val)
+    }
+}
+
+impl From<String> for Value {
+    fn from(val: String) -> Self {
+        Value::Str(val)
+    }
+}
+
+impl From<Value> for Option<i32> {
+    fn from(val: Value) -> Self {
+        if let Value::Int(x) = val { Some(x) } else { None }
+    }
+}
+
+impl From<Value> for Option<f32> {
+    fn from(val: Value) -> Self {
+        if let Value::Float(x) = val { Some(x) } else { None }
+    }
+}
+
+impl From<Value> for Option<bool> {
+    fn from(val: Value) -> Self {
+        if let Value::Bool(x) = val { Some(x) } else { None }
+    }
+}
+
+impl From<Value> for Option<String> {
+    fn from(val: Value) -> Self {
+        if let Value::Str(x) = val { Some(x) } else { None }
+    }
 }
