@@ -2,6 +2,7 @@ use tesla::{Event, Rule, Tuple, TupleDeclaration};
 use tesla::expressions::*;
 use tesla::predicates::*;
 use std::rc::Rc;
+use std::cmp::Ordering as CmpOrd;
 use std::collections::{BTreeMap, HashMap};
 use std::iter::{FromIterator, IntoIterator, once};
 use chrono::{DateTime, Duration, UTC};
@@ -48,8 +49,7 @@ struct Stack {
     local_exprs: Vec<Rc<Expression>>,
     global_exprs: Vec<Rc<Expression>>,
     timing: Timing,
-    max_window: Duration,
-    events: Vec<Rc<Event>>, // TODO shortcuts for dependencies and stuff
+    events: Vec<Rc<Event>>,
 }
 
 impl Stack {
@@ -70,7 +70,6 @@ impl Stack {
                     local_exprs: local_exprs,
                     global_exprs: global_exprs,
                     timing: timing.clone(),
-                    max_window: Duration::seconds(0),
                     events: Vec::new(),
                 })
             }
@@ -92,9 +91,22 @@ impl Stack {
         self.global_exprs.iter().all(check_expr)
     }
 
-    fn remove_old_events(&mut self, time: &DateTime<UTC>) -> Option<DateTime<UTC>> {
+    fn remove_old_events(&mut self,
+                         times: &HashMap<usize, DateTime<UTC>>)
+                         -> Option<DateTime<UTC>> {
         // TODO reason on interval (open vs close)
-        self.events.retain(|evt| &evt.time >= time);
+        let time = match self.timing.bound {
+            TimingBound::Within { window } => times[&self.timing.upper] - window,
+            TimingBound::Between { lower } => times[&lower],
+        };
+
+        let index = self.events
+            .binary_search_by(|evt| {
+                if evt.time < time { CmpOrd::Less } else { CmpOrd::Greater }
+            })
+            .unwrap_err();
+        self.events.drain(..index);
+
         self.events.first().map(|evt| evt.time)
     }
 }
@@ -108,7 +120,16 @@ impl EventProcessor for Stack {
     }
 
     fn consume(&mut self, event: &Rc<Event>) {
-        self.events.retain(|evt| !ptr_eq(evt, event));
+        let index = {
+            let start = self.events
+                .binary_search_by(|evt| {
+                    if evt.time < event.time { CmpOrd::Less } else { CmpOrd::Greater }
+                })
+                .unwrap_err();
+            // TODO handle the absence of the event from the queue
+            self.events[start..].iter().position(|evt| ptr_eq(evt, event)).unwrap() + start
+        };
+        self.events.remove(index);
     }
 }
 
@@ -127,10 +148,12 @@ impl Evaluator for Stack {
             self.is_globally_satisfied(&context.clone().set_tuple(&evt.tuple))
         };
 
+        // TODO maybe improve time bounds with binary search
+        let mut iterator = self.events.iter();
+
         match self.predicate.ty {
             PredicateType::Event { ref selection, .. } => {
                 let map_res = |evt: &Rc<Event>| context.get_result().clone().push_event(evt);
-                let mut iterator = self.events.iter();
                 match *selection {
                     EventSelection::Each => iterator.filter(check_evt).map(map_res).collect(),
                     EventSelection::First => {
@@ -142,13 +165,16 @@ impl Evaluator for Stack {
                 }
             }
             PredicateType::EventAggregate { ref aggregator, .. } => {
-                let iterator = self.events.iter().filter(check_evt);
                 let map_res = |res: Value| context.get_result().clone().push_aggregate(res);
-                Vec::from_iter(compute_aggregate(aggregator, iterator, &self.tuple.attributes)
-                    .map(map_res))
+                compute_aggregate(aggregator,
+                                  iterator.filter(check_evt),
+                                  &self.tuple.attributes)
+                    .map(map_res)
+                    .into_iter()
+                    .collect()
             }
             PredicateType::EventNegation { .. } => {
-                if !self.events.iter().any(|evt| check_evt(&evt)) {
+                if !iterator.any(|evt| check_evt(&evt)) {
                     vec![context.get_result().clone()]
                 } else {
                     Vec::new()
@@ -172,25 +198,12 @@ impl RuleStacks {
             let predicates = rule.predicates();
             let trigger = Trigger::new(&predicates[0]);
 
-            let mut stacks = predicates.iter()
+            let stacks = predicates.iter()
                 .enumerate()
                 .filter_map(|(i, pred)| {
                     Stack::new(&declarations[&pred.tuple.ty_id], pred).map(|stack| (i, stack))
                 })
                 .collect::<BTreeMap<usize, Stack>>();
-
-            let windows = stacks.iter()
-                .map(|(_, stack)| {
-                    match stack.timing.bound {
-                        TimingBound::Within { window } => window,
-                        TimingBound::Between { lower } => stacks[&lower].max_window,
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            for (i, (_, stack)) in stacks.iter_mut().enumerate() {
-                stack.max_window = windows[i];
-            }
 
             (trigger, stacks)
         };
@@ -203,11 +216,11 @@ impl RuleStacks {
     }
 
     fn remove_old_events(&mut self, trigger_time: &DateTime<UTC>) {
-        let mut oldest_times = once((0, *trigger_time)).collect::<HashMap<_, _>>();
+        let mut times = HashMap::new();
+        times.insert(0, *trigger_time);
         for (&i, stack) in &mut self.stacks {
-            let prev = oldest_times[&stack.timing.upper];
-            let time = stack.remove_old_events(&prev).unwrap_or_else(|| *trigger_time);
-            oldest_times.insert(i, time);
+            let time = stack.remove_old_events(&times).unwrap_or(*trigger_time);
+            times.insert(i, time);
         }
     }
 
@@ -253,6 +266,8 @@ impl RuleStacks {
             self.remove_old_events(&event.time);
             // TODO maybe work directly with contexts instead of partial results
             let partial_results = self.get_partial_results(event);
+            // TODO filter for where clause
+            // TODO consuming clause
             self.generate_events(event, &partial_results)
         } else {
             Vec::new()
