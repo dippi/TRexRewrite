@@ -4,6 +4,7 @@ use tesla::*;
 use tesla::expressions::*;
 use tesla::predicates::*;
 use chrono::{DateTime, UTC};
+use owning_ref::{ErasedRcRef, RcRef};
 use std::collections::HashMap;
 use std::rc::Rc;
 use self::operations::*;
@@ -35,14 +36,14 @@ impl Expression {
 }
 
 #[derive(Clone, Debug)]
-pub struct PartialResult<'a> {
-    tuples: HashMap<usize, &'a Tuple>,
+pub struct PartialResult {
+    tuples: HashMap<usize, ErasedRcRef<Tuple>>,
     aggregates: HashMap<usize, Value>,
     times: HashMap<usize, DateTime<UTC>>,
     len: usize,
 }
 
-impl<'a> PartialResult<'a> {
+impl PartialResult {
     pub fn new() -> Self {
         PartialResult {
             tuples: HashMap::new(),
@@ -52,19 +53,20 @@ impl<'a> PartialResult<'a> {
         }
     }
 
-    pub fn with_trigger(trigger: &'a Rc<Event>) -> Self {
+    pub fn with_trigger(trigger: &Rc<Event>) -> Self {
         PartialResult::new().push_event(trigger)
     }
 
-    pub fn push_event(mut self, event: &'a Rc<Event>) -> Self {
-        self.tuples.insert(self.len, &event.tuple);
+    pub fn push_event(mut self, event: &Rc<Event>) -> Self {
+        let tuple = RcRef::new(event.clone()).map(|evt| &evt.tuple).erase_owner();
+        self.tuples.insert(self.len, tuple);
         self.times.insert(self.len, event.time);
         self.len += 1;
         self
     }
 
-    pub fn push_tuple(mut self, tuple: &'a Tuple) -> Self {
-        self.tuples.insert(self.len, tuple);
+    pub fn push_tuple(mut self, tuple: &Rc<Tuple>) -> Self {
+        self.tuples.insert(self.len, RcRef::new(tuple.clone()).erase_owner());
         self.len += 1;
         self
     }
@@ -138,13 +140,13 @@ impl<'a> EvaluationContext for SimpleContext<'a> {
 #[derive(Clone, Debug)]
 pub struct CompleteContext<'a> {
     predicates: &'a Vec<Predicate>,
-    result: &'a PartialResult<'a>,
+    result: &'a PartialResult,
     current: usize,
     tuple: Option<&'a Tuple>,
 }
 
 impl<'a> CompleteContext<'a> {
-    pub fn new(predicates: &'a Vec<Predicate>, result: &'a PartialResult<'a>) -> Self {
+    pub fn new(predicates: &'a Vec<Predicate>, result: &'a PartialResult) -> Self {
         CompleteContext {
             predicates: predicates,
             result: result,
@@ -155,7 +157,7 @@ impl<'a> CompleteContext<'a> {
 
     pub fn set_current(mut self, current: usize) -> Self {
         self.current = current;
-        self.tuple = self.result.tuples.get(&current).map(|it| *it);
+        self.tuple = self.result.tuples.get(&current).map(|it| &**it);
         self
     }
 

@@ -18,18 +18,18 @@ trait EventProcessor {
     fn consume(&mut self, event: &Rc<Event>);
 }
 
-trait Evaluator<'a> {
-    fn evaluate(&'a self, context: &'a CompleteContext<'a>) -> Vec<PartialResult<'a>>;
+trait Evaluator {
+    fn evaluate<'a>(&'a self, context: &'a CompleteContext<'a>) -> Vec<PartialResult>;
 }
 
 #[derive(Clone, Debug)]
-struct Trigger<'a> {
-    predicate: &'a Predicate,
+struct Trigger {
+    predicate: Predicate,
 }
 
-impl<'a> Trigger<'a> {
-    pub fn new(predicate: &'a Predicate) -> Self {
-        Trigger { predicate: predicate }
+impl Trigger {
+    pub fn new(predicate: &Predicate) -> Self {
+        Trigger { predicate: predicate.clone() }
     }
 
     pub fn is_satisfied(&self, event: &Rc<Event>) -> bool {
@@ -43,19 +43,19 @@ impl<'a> Trigger<'a> {
 }
 
 #[derive(Clone, Debug)]
-struct Stack<'a> {
-    tuple: &'a TupleDeclaration,
-    predicate: &'a Predicate,
+struct Stack {
+    tuple: TupleDeclaration,
+    predicate: Predicate,
     local_exprs: Vec<Rc<Expression>>,
     global_exprs: Vec<Rc<Expression>>,
-    timing: &'a Timing,
+    timing: Timing,
     loopback: Vec<usize>,
     max_window: Duration,
     events: Vec<Rc<Event>>, // TODO shortcuts for dependencies and stuff
 }
 
-impl<'a> Stack<'a> {
-    fn new(tuple: &'a TupleDeclaration, predicate: &'a Predicate) -> Option<Stack<'a>> {
+impl Stack {
+    fn new(tuple: &TupleDeclaration, predicate: &Predicate) -> Option<Stack> {
         match predicate.ty {
             PredicateType::Event { ref timing, .. } |
             PredicateType::EventAggregate { ref timing, .. } |
@@ -67,11 +67,11 @@ impl<'a> Stack<'a> {
                     .partition(|expr| expr.is_local());
 
                 Some(Stack {
-                    tuple: tuple,
-                    predicate: predicate,
+                    tuple: tuple.clone(),
+                    predicate: predicate.clone(),
                     local_exprs: local_exprs,
                     global_exprs: global_exprs,
-                    timing: timing,
+                    timing: timing.clone(),
                     loopback: Vec::new(),
                     max_window: Duration::seconds(0),
                     events: Vec::new(),
@@ -90,7 +90,7 @@ impl<'a> Stack<'a> {
         }
     }
 
-    fn is_globally_satisfied<'b>(&self, context: &'b CompleteContext<'b>) -> bool {
+    fn is_globally_satisfied(&self, context: &CompleteContext) -> bool {
         let check_expr = |expr: &Rc<_>| context.evaluate_expression(expr).as_bool().unwrap();
         self.global_exprs.iter().all(check_expr)
     }
@@ -166,7 +166,7 @@ impl<'a> Stack<'a> {
     }
 }
 
-impl<'a> EventProcessor for Stack<'a> {
+impl EventProcessor for Stack {
     fn process(&mut self, event: &Rc<Event>) {
         if self.is_locally_satisfied(event) {
             // TODO reason on precondition: all the events arrive in chronological order
@@ -179,8 +179,8 @@ impl<'a> EventProcessor for Stack<'a> {
     }
 }
 
-impl<'a> Evaluator<'a> for Stack<'a> {
-    fn evaluate(&'a self, context: &'a CompleteContext<'a>) -> Vec<PartialResult<'a>> {
+impl Evaluator for Stack {
+    fn evaluate(&self, context: &CompleteContext) -> Vec<PartialResult> {
         let result = context.get_result();
         let upper = result.get_time(self.timing.upper);
         let lower = match self.timing.bound {
@@ -196,15 +196,15 @@ impl<'a> Evaluator<'a> for Stack<'a> {
 
         match self.predicate.ty {
             PredicateType::Event { ref selection, .. } => {
-                let map_res = |evt: &'a Rc<Event>| context.get_result().clone().push_event(&evt);
+                let map_res = |evt: &Rc<Event>| context.get_result().clone().push_event(&evt);
                 let mut iterator = self.events.iter();
                 match selection {
                     &EventSelection::Each => iterator.filter(check_evt).map(map_res).collect(),
                     &EventSelection::First => {
-                        iterator.rev().find(check_evt).map(map_res).into_iter().collect()
+                        iterator.find(check_evt).map(map_res).into_iter().collect()
                     }
                     &EventSelection::Last => {
-                        iterator.find(check_evt).map(map_res).into_iter().collect()
+                        iterator.rev().find(check_evt).map(map_res).into_iter().collect()
                     }
                 }
             }
@@ -226,25 +226,29 @@ impl<'a> Evaluator<'a> for Stack<'a> {
 }
 
 #[derive(Clone, Debug)]
-struct RuleStacks<'a> {
-    rule: &'a Rule,
-    trigger: Trigger<'a>,
-    stacks: BTreeMap<usize, Stack<'a>>,
+pub struct RuleStacks {
+    rule: Rule,
+    trigger: Trigger,
+    stacks: BTreeMap<usize, Stack>,
 }
 
-impl<'a> RuleStacks<'a> {
-    fn new(rule: &'a Rule, declarations: &'a HashMap<usize, TupleDeclaration>) -> Self {
-        let predicates = rule.predicates();
-        let trigger = Trigger::new(&predicates[0]);
+impl RuleStacks {
+    pub fn new(rule: Rule, declarations: &HashMap<usize, TupleDeclaration>) -> Self {
+        let (trigger, stacks) = {
+            let predicates = rule.predicates();
+            let trigger = Trigger::new(&predicates[0]);
 
-        let mut stacks = predicates.iter()
-            .enumerate()
-            .filter_map(|(i, pred)| {
-                Stack::new(&declarations[&pred.tuple.ty_id], pred).map(|stack| (i, stack))
-            })
-            .collect::<BTreeMap<usize, Stack<'a>>>();
+            let mut stacks = predicates.iter()
+                .enumerate()
+                .filter_map(|(i, pred)| {
+                    Stack::new(&declarations[&pred.tuple.ty_id], pred).map(|stack| (i, stack))
+                })
+                .collect::<BTreeMap<usize, Stack>>();
 
-        // TODO insert into the stack the missing info
+            // TODO insert into the stack the missing info
+
+            (trigger, stacks)
+        };
 
         RuleStacks {
             rule: rule,
@@ -253,9 +257,32 @@ impl<'a> RuleStacks<'a> {
         }
     }
 
-    fn process(&mut self, event: &Rc<Event>) {
+    pub fn process(&mut self, event: &Rc<Event>) -> Vec<Rc<Event>> {
         for (_, stack) in &mut self.stacks {
             stack.process(event);
+        }
+
+        if self.trigger.is_satisfied(event) {
+            let initial = PartialResult::with_trigger(event);
+            let mut previous = vec![initial];
+            for (_, stack) in &mut self.stacks {
+                let mut current = Vec::new();
+
+                for partial_result in &previous {
+                    let context = CompleteContext::new(self.rule.predicates(), partial_result);
+                    current.append(&mut stack.evaluate(&context));
+                }
+
+                previous = current;
+                if previous.is_empty() {
+                    break;
+                }
+            }
+
+            // TODO generate events from rule template
+            Vec::new()
+        } else {
+            Vec::new()
         }
     }
 }
