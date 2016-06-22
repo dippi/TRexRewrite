@@ -1,13 +1,12 @@
 use tesla::{Event, Rule, TupleDeclaration};
 use tesla::expressions::*;
 use tesla::predicates::*;
-use std::f32;
 use std::rc::Rc;
 use std::collections::{BTreeMap, HashMap};
 use std::iter::{FromIterator, IntoIterator, once};
-use std::ops::Add;
 use chrono::{DateTime, Duration, UTC};
 use trex::expressions::*;
+use trex::aggregators::compute_aggregate;
 
 fn ptr_eq<T>(a: *const T, b: *const T) -> bool {
     a == b
@@ -98,71 +97,6 @@ impl Stack {
         self.events.retain(|evt| &evt.time >= time);
         self.events.first().map(|evt| evt.time)
     }
-
-    fn compute_aggregate<'b, T>(&self, aggregator: &Aggregator, iterator: T) -> Option<Value>
-        where T: Iterator<Item = &'b Rc<Event>>
-    {
-        match aggregator {
-            &Aggregator::Avg(attr) => {
-                match self.tuple.attributes[attr].ty {
-                    BasicType::Int => {
-                        let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_int());
-                        let (count, sum) = mapped.fold((0i32, 0), |acc, x| (acc.0 + 1, acc.1 + x));
-                        if count > 0 { Some(Value::from(sum as f32 / count as f32)) } else { None }
-                    }
-                    BasicType::Float => {
-                        let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_float());
-                        let (count, sum) =
-                            mapped.fold((0i32, 0.0), |acc, x| (acc.0 + 1, acc.1 + x));
-                        if count > 0 { Some(Value::from(sum / count as f32)) } else { None }
-                    }
-                    _ => panic!("Tring to compute aggregate on wrong Value type"),
-                }
-            }
-            &Aggregator::Sum(attr) => {
-                match self.tuple.attributes[attr].ty {
-                    BasicType::Int => {
-                        let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_int());
-                        Some(Value::from(mapped.fold(0, Add::add)))
-                    }
-                    BasicType::Float => {
-                        let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_float());
-                        Some(Value::from(mapped.fold(0.0, Add::add)))
-                    }
-                    _ => panic!("Tring to compute aggregate on wrong Value type"),
-                }
-            }
-            &Aggregator::Min(attr) => {
-                match self.tuple.attributes[attr].ty {
-                    BasicType::Int => {
-                        let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_int());
-                        mapped.min().map(Value::from)
-                    }
-                    BasicType::Float => {
-                        let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_float());
-                        let min = mapped.fold(f32::NAN, f32::min);
-                        if !min.is_nan() { Some(Value::from(min)) } else { None }
-                    }
-                    _ => panic!("Tring to compute aggregate on wrong Value type"),
-                }
-            }
-            &Aggregator::Max(attr) => {
-                match self.tuple.attributes[attr].ty {
-                    BasicType::Int => {
-                        let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_int());
-                        mapped.max().map(Value::from)
-                    }
-                    BasicType::Float => {
-                        let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_float());
-                        let max = mapped.fold(f32::NAN, f32::max);
-                        if !max.is_nan() { Some(Value::from(max)) } else { None }
-                    }
-                    _ => panic!("Tring to compute aggregate on wrong Value type"),
-                }
-            }
-            &Aggregator::Count => Some(Value::from(iterator.count() as i32)),
-        }
-    }
 }
 
 impl EventProcessor for Stack {
@@ -210,7 +144,8 @@ impl Evaluator for Stack {
             PredicateType::EventAggregate { ref aggregator, .. } => {
                 let iterator = self.events.iter().filter(check_evt);
                 let map_res = |res: Value| context.get_result().clone().push_aggregate(res);
-                Vec::from_iter(self.compute_aggregate(aggregator, iterator).map(map_res))
+                Vec::from_iter(compute_aggregate(aggregator, iterator, &self.tuple.attributes)
+                    .map(map_res))
             }
             PredicateType::EventNegation { .. } => {
                 if !self.events.iter().any(|evt| check_evt(&evt)) {

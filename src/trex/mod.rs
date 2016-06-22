@@ -1,4 +1,5 @@
 mod expressions;
+mod aggregators;
 mod stacks;
 mod sqldriver;
 
