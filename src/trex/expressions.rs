@@ -1,8 +1,8 @@
 use tesla::*;
 use tesla::expressions::*;
 use chrono::{DateTime, UTC};
-use std::collections::HashMap;
-use std::rc::Rc;
+use linear_map::LinearMap;
+use std::sync::Arc;
 use std::cmp::max;
 use trex::operations::*;
 
@@ -50,28 +50,31 @@ impl Expression {
 
 #[derive(Clone, Debug)]
 pub struct PartialResult {
-    parameters: HashMap<(usize, usize), Value>,
-    events: HashMap<usize, Rc<Event>>,
+    parameters: LinearMap<(usize, usize), Value>,
+    events: LinearMap<usize, Arc<Event>>,
 }
 
 impl PartialResult {
     pub fn new() -> Self {
         PartialResult {
-            parameters: HashMap::new(),
-            events: HashMap::new(),
+            parameters: LinearMap::new(),
+            events: LinearMap::new(),
         }
     }
 
-    pub fn insert_event(mut self, idx: usize, event: Rc<Event>) -> Self {
+    #[inline(always)]
+    pub fn insert_event(mut self, idx: usize, event: Arc<Event>) -> Self {
         self.events.insert(idx, event);
         self
     }
 
+    #[inline(always)]
     pub fn insert_parameter(mut self, idx: (usize, usize), parameter: Value) -> Self {
         self.parameters.insert(idx, parameter);
         self
     }
 
+    #[inline(always)]
     pub fn get_time(&self, index: usize) -> DateTime<UTC> {
         self.events[&index].time
     }

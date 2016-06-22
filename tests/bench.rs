@@ -4,7 +4,7 @@ extern crate rand;
 extern crate chrono;
 extern crate trex;
 
-use std::rc::Rc;
+use std::sync::Arc;
 use std::thread;
 use std::sync::mpsc::sync_channel;
 use rand::Rng;
@@ -59,10 +59,10 @@ fn generate_length_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
     let mut rules = Vec::new();
     for i in 0..cfg.num_rules {
         let id = i % cfg.num_def + 1;
-        let constraint = Rc::new(Expression::BinaryOperation {
+        let constraint = Arc::new(Expression::BinaryOperation {
             operator: BinaryOperator::Equal,
-            left: Rc::new(Expression::Reference { attribute: 0 }),
-            right: Rc::new(Expression::Immediate { value: 1.into() }),
+            left: Box::new(Expression::Reference { attribute: 0 }),
+            right: Box::new(Expression::Immediate { value: 1.into() }),
         });
         let root_pred = Predicate {
             ty: PredicateType::Trigger { parameters: Vec::new() },
@@ -134,7 +134,7 @@ fn generate_length_events<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Event> {
 #[derive(Clone, Debug)]
 struct DebugListener;
 impl Listener for DebugListener {
-    fn receive(&mut self, event: &Rc<Event>) {
+    fn receive(&mut self, event: &Arc<Event>) {
         println!("{:?}", event);
     }
 }
@@ -152,7 +152,7 @@ impl Drop for CountListener {
     }
 }
 impl Listener for CountListener {
-    fn receive(&mut self, event: &Rc<Event>) {
+    fn receive(&mut self, event: &Arc<Event>) {
         self.count += 1;
     }
 }
@@ -188,7 +188,7 @@ fn execute_bench_length(cfg: &Config) {
         dropped
     });
     while let Ok(evt) = rx.recv() {
-        engine.publish(&Rc::new(evt));
+        engine.publish(&Arc::new(evt));
     }
 
     println!("Dropped: {:2.2}% - Time: {:5}ms",

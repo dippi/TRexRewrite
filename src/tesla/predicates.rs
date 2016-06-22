@@ -1,6 +1,6 @@
 use std::vec::Vec;
 use std::string::String;
-use std::rc::Rc;
+use std::sync::Arc;
 use tesla::expressions::Expression;
 use chrono::Duration;
 
@@ -23,7 +23,7 @@ pub enum Aggregator {
 #[derive(Clone, Debug)]
 pub struct ParameterDeclaration {
     pub name: String,
-    pub expression: Rc<Expression>,
+    pub expression: Arc<Expression>,
 }
 
 #[derive(Clone, Debug)]
@@ -92,7 +92,7 @@ pub enum PredicateType {
 #[derive(Clone, Debug)]
 pub struct ConstrainedTuple {
     pub ty_id: usize,
-    pub constraints: Vec<Rc<Expression>>,
+    pub constraints: Vec<Arc<Expression>>,
     pub alias: String,
 }
 

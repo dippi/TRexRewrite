@@ -1,20 +1,22 @@
 use tesla::{Event, Rule, Tuple, TupleDeclaration};
 use tesla::expressions::*;
 use tesla::predicates::*;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::cmp::Ordering as CmpOrd;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use chrono::{DateTime, UTC};
 use trex::expressions::*;
 use trex::aggregators::compute_aggregate;
+
+use trex::FnvHashMap;
 
 fn ptr_eq<T>(a: *const T, b: *const T) -> bool {
     a == b
 }
 
 pub trait EventProcessor {
-    fn process(&mut self, event: &Rc<Event>);
-    fn consume(&mut self, event: &Rc<Event>);
+    fn process(&mut self, event: &Arc<Event>);
+    fn consume(&mut self, event: &Arc<Event>);
 }
 
 pub trait Evaluator {
@@ -32,11 +34,11 @@ impl Trigger {
     }
 
     pub fn is_satisfied(&self, context: &CompleteContext) -> bool {
-        let check_expr = |expr: &Rc<_>| context.evaluate_expression(expr).as_bool().unwrap();
+        let check_expr = |expr: &Arc<_>| context.evaluate_expression(expr).as_bool().unwrap();
         self.predicate.tuple.constraints.iter().all(check_expr)
     }
 
-    pub fn evaluate(&self, event: &Rc<Event>) -> Option<PartialResult> {
+    pub fn evaluate(&self, event: &Arc<Event>) -> Option<PartialResult> {
         if event.tuple.ty_id == self.predicate.tuple.ty_id {
             let res = if let PredicateType::Trigger { ref parameters } = self.predicate.ty {
                 parameters.iter().enumerate().fold(PartialResult::new(), |res, (i, param)| {
@@ -63,10 +65,10 @@ struct Stack {
     idx: usize,
     tuple: TupleDeclaration,
     predicate: Predicate,
-    local_exprs: Vec<Rc<Expression>>,
-    global_exprs: Vec<Rc<Expression>>,
+    local_exprs: Vec<Arc<Expression>>,
+    global_exprs: Vec<Arc<Expression>>,
     timing: Timing,
-    events: Vec<Rc<Event>>,
+    events: Vec<Arc<Event>>,
 }
 
 impl Stack {
@@ -95,22 +97,22 @@ impl Stack {
         }
     }
 
-    fn is_locally_satisfied(&self, event: &Rc<Event>) -> bool {
+    fn is_locally_satisfied(&self, event: &Arc<Event>) -> bool {
         event.tuple.ty_id == self.predicate.tuple.ty_id &&
         {
             let context = SimpleContext::new(&event.tuple);
-            let check_expr = |expr: &Rc<_>| context.evaluate_expression(expr).as_bool().unwrap();
+            let check_expr = |expr: &Arc<_>| context.evaluate_expression(expr).as_bool().unwrap();
             self.local_exprs.iter().all(check_expr)
         }
     }
 
     fn is_globally_satisfied(&self, context: &CompleteContext) -> bool {
-        let check_expr = |expr: &Rc<_>| context.evaluate_expression(expr).as_bool().unwrap();
+        let check_expr = |expr: &Arc<_>| context.evaluate_expression(expr).as_bool().unwrap();
         self.global_exprs.iter().all(check_expr)
     }
 
     fn remove_old_events(&mut self,
-                         times: &HashMap<usize, DateTime<UTC>>)
+                         times: &FnvHashMap<usize, DateTime<UTC>>)
                          -> Option<DateTime<UTC>> {
         // TODO reason on interval (open vs close)
         let time = match self.timing.bound {
@@ -130,14 +132,14 @@ impl Stack {
 }
 
 impl EventProcessor for Stack {
-    fn process(&mut self, event: &Rc<Event>) {
+    fn process(&mut self, event: &Arc<Event>) {
         if self.is_locally_satisfied(event) {
             // TODO reason on precondition: all the events arrive in chronological order
             self.events.push(event.clone());
         }
     }
 
-    fn consume(&mut self, event: &Rc<Event>) {
+    fn consume(&mut self, event: &Arc<Event>) {
         let index = {
             let start = self.events
                 .binary_search_by(|evt| {
@@ -174,7 +176,7 @@ impl Evaluator for Stack {
 
         match self.predicate.ty {
             PredicateType::Event { ref selection, ref parameters, .. } => {
-                let filter_map = |evt: &Rc<Event>| {
+                let filter_map = |evt: &Arc<Event>| {
                     let res =
                         parameters.iter().enumerate().fold(result.clone(), |res, (i, param)| {
                             let val = CompleteContext::new(&res, &evt.tuple)
@@ -194,7 +196,7 @@ impl Evaluator for Stack {
                 }
             }
             PredicateType::EventAggregate { ref aggregator, ref parameter, .. } => {
-                let check = |evt: &&Rc<Event>| {
+                let check = |evt: &&Arc<Event>| {
                     self.is_globally_satisfied(&CompleteContext::new(result, &evt.tuple))
                 };
                 let map = |aggr: Value| {
@@ -208,7 +210,7 @@ impl Evaluator for Stack {
                     .collect()
             }
             PredicateType::EventNegation { .. } => {
-                let check = |evt: &Rc<Event>| {
+                let check = |evt: &Arc<Event>| {
                     self.is_globally_satisfied(&CompleteContext::new(&result, &evt.tuple))
                 };
                 if !iterator.any(check) { vec![result.clone()] } else { Vec::new() }
@@ -226,7 +228,7 @@ pub struct RuleStacks {
 }
 
 impl RuleStacks {
-    pub fn new(rule: Rule, declarations: &HashMap<usize, TupleDeclaration>) -> Self {
+    pub fn new(rule: Rule, declarations: &FnvHashMap<usize, TupleDeclaration>) -> Self {
         let (trigger, stacks) = {
             let predicates = rule.predicates();
             let trigger = Trigger::new(&predicates[0]);
@@ -249,7 +251,7 @@ impl RuleStacks {
     }
 
     fn remove_old_events(&mut self, trigger_time: &DateTime<UTC>) {
-        let mut times = HashMap::new();
+        let mut times = FnvHashMap::default();
         times.insert(0, *trigger_time);
         for (&i, stack) in &mut self.stacks {
             let time = stack.remove_old_events(&times).unwrap_or(*trigger_time);
@@ -266,14 +268,14 @@ impl RuleStacks {
             })
     }
 
-    fn generate_events<'a, T>(&self, event: &Rc<Event>, results: T) -> Vec<Rc<Event>>
+    fn generate_events<'a, T>(&self, event: &Arc<Event>, results: T) -> Vec<Arc<Event>>
         where T: IntoIterator<Item = &'a PartialResult>
     {
         results.into_iter()
             .map(|res| {
                 let context = CompleteContext::new(res, ());
                 let template = self.rule.event_template();
-                Rc::new(Event {
+                Arc::new(Event {
                     tuple: Tuple {
                         ty_id: template.ty_id,
                         data: template.attributes
@@ -287,7 +289,7 @@ impl RuleStacks {
             .collect()
     }
 
-    pub fn process(&mut self, event: &Rc<Event>) -> Vec<Rc<Event>> {
+    pub fn process(&mut self, event: &Arc<Event>) -> Vec<Arc<Event>> {
         for (_, stack) in &mut self.stacks {
             stack.process(event);
         }

@@ -1,7 +1,7 @@
 pub mod expressions;
 pub mod predicates;
 
-use std::rc::Rc;
+use std::sync::Arc;
 use std::boxed::Box;
 use std::vec::Vec;
 use std::string::String;
@@ -107,10 +107,10 @@ impl<'a, T: 'a> Clone for Box<ClonableIterator<'a, Item = T> + 'a> {
     }
 }
 
-pub type EventsIterator<'a> = Box<ClonableIterator<'a, Item = &'a Rc<Event>> + 'a>;
+pub type EventsIterator<'a> = Box<ClonableIterator<'a, Item = &'a Arc<Event>> + 'a>;
 
 pub trait Listener {
-    fn receive(&mut self, event: &Rc<Event>);
+    fn receive(&mut self, event: &Arc<Event>);
     fn receive_all(&mut self, events: EventsIterator) {
         for event in events {
             self.receive(event);
@@ -121,7 +121,7 @@ pub trait Listener {
 pub trait Engine {
     fn declare(&mut self, tuple: TupleDeclaration);
     fn define(&mut self, rule: Rule);
-    fn publish(&mut self, event: &Rc<Event>);
+    fn publish(&mut self, event: &Arc<Event>);
     fn publish_all(&mut self, events: EventsIterator) {
         for event in events {
             self.publish(event);

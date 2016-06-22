@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 #[derive(Clone, Debug)]
 pub enum BasicType {
     Int,
@@ -53,20 +51,20 @@ pub enum Expression {
     Aggregate,
     Parameter {
         predicate: usize,
-        parameter: usize, // TODO maybe replace with Rc<Expression>
+        parameter: usize, // TODO maybe replace with Arc<Expression>
     },
     Cast {
         ty: BasicType,
-        expression: Rc<Expression>,
+        expression: Box<Expression>,
     },
     UnaryOperation {
         operator: UnaryOperator,
-        expression: Rc<Expression>,
+        expression: Box<Expression>,
     },
     BinaryOperation {
         operator: BinaryOperator,
-        left: Rc<Expression>,
-        right: Rc<Expression>,
+        left: Box<Expression>,
+        right: Box<Expression>,
     },
 }
 
