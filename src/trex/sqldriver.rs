@@ -1,24 +1,26 @@
 use tesla::*;
 use tesla::expressions::*;
 use tesla::predicates::*;
+use trex::stacks::*;
+use trex::expressions::*;
+use rusqlite::{Connection, Statement};
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
 
-pub trait ToSQL {
-    fn to_sql(&self, tuple: &TupleDeclaration) -> String;
-}
-
-impl ToSQL for Value {
-    fn to_sql(&self, _: &TupleDeclaration) -> String {
+impl Value {
+    fn get_sql(&self) -> String {
         match *self {
             Value::Int(value) => format!("{}", value),
             Value::Float(value) => format!("{}", value),
             Value::Bool(value) => format!("{}", value),
+            // TODO check excaping for SQL injection
             Value::Str(ref value) => format!("{:?}", value),
         }
     }
 }
 
-impl ToSQL for UnaryOperator {
-    fn to_sql(&self, _: &TupleDeclaration) -> String {
+impl UnaryOperator {
+    fn get_sql(&self) -> String {
         match *self {
                 UnaryOperator::Minus => "-",
                 UnaryOperator::Not => "!",
@@ -27,8 +29,8 @@ impl ToSQL for UnaryOperator {
     }
 }
 
-impl ToSQL for BinaryOperator {
-    fn to_sql(&self, _: &TupleDeclaration) -> String {
+impl BinaryOperator {
+    fn get_sql(&self) -> String {
         match *self {
                 BinaryOperator::Plus => "+",
                 BinaryOperator::Minus => "-",
@@ -45,10 +47,10 @@ impl ToSQL for BinaryOperator {
     }
 }
 
-impl ToSQL for Expression {
-    fn to_sql(&self, tuple: &TupleDeclaration) -> String {
+impl Expression {
+    fn get_sql(&self, tuple: &TupleDeclaration) -> String {
         match *self {
-            Expression::Immediate { ref value } => value.to_sql(tuple),
+            Expression::Immediate { ref value } => value.get_sql(),
             Expression::Reference { attribute } => {
                 format!("{}.{}", tuple.name, tuple.attributes[attribute].name)
             }
@@ -56,28 +58,28 @@ impl ToSQL for Expression {
                 format!(":param{}x{}", predicate, parameter)
             }
             Expression::Aggregate => "trexaggregate".to_owned(),
-            Expression::Cast { ref expression, .. } => expression.to_sql(tuple),
+            Expression::Cast { ref expression, .. } => expression.get_sql(tuple),
             Expression::UnaryOperation { ref operator, ref expression } => {
-                format!("({}{})", operator.to_sql(tuple), expression.to_sql(tuple))
+                format!("({}{})", operator.get_sql(), expression.get_sql(tuple))
             }
             Expression::BinaryOperation { ref operator, ref left, ref right } => {
                 format!("({} {} {})",
-                        left.to_sql(tuple),
-                        operator.to_sql(tuple),
-                        right.to_sql(tuple))
+                        left.get_sql(tuple),
+                        operator.get_sql(),
+                        right.get_sql(tuple))
             }
         }
     }
 }
 
-impl ToSQL for ParameterDeclaration {
-    fn to_sql(&self, tuple: &TupleDeclaration) -> String {
-        format!("{} AS {}", self.expression.to_sql(tuple), self.name)
+impl ParameterDeclaration {
+    fn get_sql(&self, tuple: &TupleDeclaration) -> String {
+        format!("{} AS {}", self.expression.get_sql(tuple), self.name)
     }
 }
 
-impl ToSQL for Order {
-    fn to_sql(&self, _: &TupleDeclaration) -> String {
+impl Order {
+    fn get_sql(&self) -> String {
         match *self {
                 Order::Asc => "ASC",
                 Order::Desc => "DESC",
@@ -86,17 +88,17 @@ impl ToSQL for Order {
     }
 }
 
-impl ToSQL for Ordering {
-    fn to_sql(&self, tuple: &TupleDeclaration) -> String {
+impl Ordering {
+    fn get_sql(&self, tuple: &TupleDeclaration) -> String {
         format!("{}.{} {}",
                 tuple.name,
                 tuple.attributes[self.attribute].name,
-                self.direction.to_sql(tuple))
+                self.direction.get_sql())
     }
 }
 
-impl ToSQL for Aggregator {
-    fn to_sql(&self, tuple: &TupleDeclaration) -> String {
+impl Aggregator {
+    fn get_sql(&self, tuple: &TupleDeclaration) -> String {
         match *self {
             Aggregator::Avg(attribute) => {
                 format!("AVG({}.{})", tuple.name, tuple.attributes[attribute].name)
@@ -115,13 +117,13 @@ impl ToSQL for Aggregator {
     }
 }
 
-impl ToSQL for Predicate {
-    fn to_sql(&self, tuple: &TupleDeclaration) -> String {
+impl Predicate {
+    fn get_sql(&self, tuple: &TupleDeclaration) -> String {
         let selection;
         let filters = self.tuple
             .constraints
             .iter()
-            .map(|expr| expr.to_sql(tuple))
+            .map(|expr| expr.get_sql(tuple))
             .collect::<Vec<_>>()
             .join(" AND ");
         let mut rest = String::new();
@@ -129,25 +131,25 @@ impl ToSQL for Predicate {
         match self.ty {
             PredicateType::OrderdStatic { ref parameters, ref ordering } => {
                 selection = parameters.iter()
-                    .map(|par| par.to_sql(tuple))
+                    .map(|par| par.get_sql(tuple))
                     .collect::<Vec<_>>()
                     .join(", ");
                 let order_by = ordering.iter()
-                    .map(|ord| ord.to_sql(tuple))
+                    .map(|ord| ord.get_sql(tuple))
                     .collect::<Vec<_>>()
                     .join(", ");
                 rest = format!("ORDER BY {} LIMIT 1", order_by);
             }
             PredicateType::UnorderedStatic { ref parameters } => {
                 selection = parameters.iter()
-                    .map(|par| par.to_sql(tuple))
+                    .map(|par| par.get_sql(tuple))
                     .collect::<Vec<_>>()
                     .join(", ");
             }
             PredicateType::StaticAggregate { ref aggregator, ref parameter } => {
                 selection = format!("{} AS trexaggregate, {}",
-                                    aggregator.to_sql(tuple),
-                                    parameter.to_sql(tuple));
+                                    aggregator.get_sql(tuple),
+                                    parameter.get_sql(tuple));
             }
             PredicateType::StaticNegation => {
                 selection = "1".to_owned();
@@ -161,5 +163,31 @@ impl ToSQL for Predicate {
                 tuple.name,
                 filters,
                 rest)
+    }
+}
+
+pub struct SQLiteDriver {
+    statement: String,
+    pool: Pool<SqliteConnectionManager>,
+}
+
+impl SQLiteDriver {
+    fn new(predicate: &Predicate,
+           tuple: &TupleDeclaration,
+           pool: Pool<SqliteConnectionManager>)
+           -> Self {
+        SQLiteDriver {
+            statement: predicate.get_sql(tuple),
+            pool: pool,
+        }
+    }
+}
+
+impl Evaluator for SQLiteDriver {
+    fn evaluate(&self, context: &CompleteContext) -> Vec<PartialResult> {
+        // TODO handle errors with Result<_, _>
+        let conn = self.pool.get().unwrap();
+        let stmt = conn.prepare_cached(&self.statement).unwrap();
+        unimplemented!()
     }
 }
