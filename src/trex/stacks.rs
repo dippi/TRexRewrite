@@ -1,4 +1,4 @@
-use tesla::{Event, Rule, TupleDeclaration};
+use tesla::{Event, Rule, Tuple, TupleDeclaration};
 use tesla::expressions::*;
 use tesla::predicates::*;
 use std::rc::Rc;
@@ -211,6 +211,39 @@ impl RuleStacks {
         }
     }
 
+    fn get_partial_results(&self, event: &Rc<Event>) -> Vec<PartialResult> {
+        let initial = PartialResult::with_trigger(event);
+        self.stacks
+            .iter()
+            .fold(vec![initial], |previous, (_, stack)| {
+                previous.iter()
+                    .flat_map(|res| {
+                        stack.evaluate(&CompleteContext::new(self.rule.predicates(), res))
+                    })
+                    .collect()
+                // TODO maybe interrupt fold if prev is empty (combo scan + take_while + last)
+            })
+    }
+
+    fn generate_events(&self, event: &Rc<Event>, results: &Vec<PartialResult>) -> Vec<Rc<Event>> {
+        results.iter()
+            .map(|res| {
+                let context = CompleteContext::new(self.rule.predicates(), res);
+                let template = self.rule.event_template();
+                Rc::new(Event {
+                    tuple: Tuple {
+                        ty_id: template.ty_id,
+                        data: template.attributes
+                            .iter()
+                            .map(|expr| context.evaluate_expression(expr))
+                            .collect(),
+                    },
+                    time: event.time,
+                })
+            })
+            .collect()
+    }
+
     pub fn process(&mut self, event: &Rc<Event>) -> Vec<Rc<Event>> {
         for (_, stack) in &mut self.stacks {
             stack.process(event);
@@ -218,25 +251,9 @@ impl RuleStacks {
 
         if self.trigger.is_satisfied(event) {
             self.remove_old_events(&event.time);
-
-            let initial = PartialResult::with_trigger(event);
-            let mut previous = vec![initial];
-            for (_, stack) in &mut self.stacks {
-                let mut current = Vec::new();
-
-                for partial_result in &previous {
-                    let context = CompleteContext::new(self.rule.predicates(), partial_result);
-                    current.append(&mut stack.evaluate(&context));
-                }
-
-                previous = current;
-                if previous.is_empty() {
-                    break;
-                }
-            }
-
-            // TODO generate events from rule template
-            Vec::new()
+            // TODO maybe work directly with contexts instead of partial results
+            let partial_results = self.get_partial_results(event);
+            self.generate_events(event, &partial_results)
         } else {
             Vec::new()
         }
