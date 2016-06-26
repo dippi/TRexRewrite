@@ -4,10 +4,12 @@ use tesla::predicates::*;
 use trex::stacks::*;
 use trex::expressions::*;
 use linear_map::LinearMap;
+use lru_cache::LruCache;
 use rusqlite::Row;
 use rusqlite::types::{ToSql, Value as SqlValue};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
+use std::sync::{Arc, Mutex};
 
 struct SqlContext<'a> {
     idx: usize,
@@ -191,6 +193,7 @@ impl<'a> SqlContext<'a> {
             _ => panic!("Error composing the SQL statement"),
         }
 
+        // FIXME guard against an empty selection!
         format!("SELECT {} FROM {} WHERE {} {}",
                 if !selection.is_empty() { selection } else { "1".to_owned() },
                 self.tuple.name,
@@ -199,6 +202,20 @@ impl<'a> SqlContext<'a> {
     }
 }
 
+#[derive(Debug, Hash, PartialEq, Eq)]
+pub struct CacheKey {
+    statement: String,
+    input_params: Vec<Value>,
+}
+
+#[derive(Debug)]
+pub enum CacheEntry {
+    Values(Vec<Vec<Value>>),
+    Exists(bool),
+}
+
+pub type Cache = LruCache<CacheKey, CacheEntry>;
+
 pub struct SQLiteDriver {
     idx: usize,
     predicate: Predicate,
@@ -206,6 +223,7 @@ pub struct SQLiteDriver {
     output_params: Vec<BasicType>,
     statement: String,
     pool: Pool<SqliteConnectionManager>,
+    cache: Arc<Mutex<Cache>>,
 }
 
 impl SQLiteDriver {
@@ -213,7 +231,8 @@ impl SQLiteDriver {
                tuple: &TupleDeclaration,
                predicate: &Predicate,
                parameters_ty: &LinearMap<(usize, usize), BasicType>,
-               pool: Pool<SqliteConnectionManager>)
+               pool: Pool<SqliteConnectionManager>,
+               cache: Arc<Mutex<Cache>>)
                -> Option<Self> {
         if let TupleType::Static = tuple.ty {
             let mut input_params = predicate.tuple
@@ -240,6 +259,7 @@ impl SQLiteDriver {
                 output_params: output_params,
                 statement: statement,
                 pool: pool,
+                cache: cache,
             })
         } else {
             None
@@ -278,51 +298,89 @@ fn get_res(row: &Row, i: i32, ty: &BasicType) -> Value {
 
 impl EventProcessor for SQLiteDriver {
     fn evaluate(&self, result: &PartialResult) -> Vec<PartialResult> {
-        // TODO handle errors with Result<_, _>
         let context = CompleteContext::new(&result, ());
-        let conn = self.pool.get().unwrap();
-        let mut stmt = conn.prepare_cached(&self.statement).unwrap();
-        let owned_params = self.input_params
+        let input_params = self.input_params
             .iter()
-            .map(|&(pred, par)| {
-                let name = format!(":param{}x{}", pred, par);
-                let value = to_sql_value(&context.get_parameter(pred, par));
-                (name, value)
-            })
+            .map(|&(pred, par)| context.get_parameter(pred, par).clone())
             .collect::<Vec<_>>();
-        let ref_params = owned_params.iter()
-            .map(|&(ref name, ref value)| (name as &str, to_sql_ref(value)))
-            .collect::<Vec<_>>();
-        match self.predicate.ty {
-            PredicateType::OrderdStatic { .. } |
-            PredicateType::UnorderedStatic { .. } => {
-                stmt.query_map_named(&ref_params, |row| {
-                        self.output_params
-                            .iter()
-                            .enumerate()
-                            .fold(result.clone(), |result, (i, ty)| {
-                                let value = get_res(row, i as i32, ty);
-                                result.insert_parameter((self.idx, i), value)
+        let key = CacheKey {
+            statement: self.statement.clone(),
+            input_params: input_params,
+        };
+        let cached = {
+            let mut cache = self.cache.lock().unwrap();
+            cache.get_mut(&key).map(|cache_entry| {
+                match *cache_entry {
+                    CacheEntry::Values(ref cached) => {
+                        cached.iter()
+                            .map(|values| {
+                                values.iter()
+                                    .enumerate()
+                                    .fold(result.clone(), |result, (i, value)| {
+                                        result.insert_parameter((self.idx, i), value.clone())
+                                    })
                             })
-                    })
-                    .unwrap()
-                    .map(Result::unwrap)
-                    .collect()
+                            .collect()
+                    }
+                    CacheEntry::Exists(exists) => {
+                        if !exists { vec![result.clone()] } else { Vec::new() }
+                    }
+                }
+            })
+        };
+        cached.unwrap_or_else(|| {
+            // TODO handle errors with Result<_, _>
+            let conn = self.pool.get().unwrap();
+            let mut stmt = conn.prepare_cached(&self.statement).unwrap();
+            let owned_params = self.input_params
+                .iter()
+                .map(|&(pred, par)| {
+                    let name = format!(":param{}x{}", pred, par);
+                    let value = to_sql_value(&context.get_parameter(pred, par));
+                    (name, value)
+                })
+                .collect::<Vec<_>>();
+            let ref_params = owned_params.iter()
+                .map(|&(ref name, ref value)| (name as &str, to_sql_ref(value)))
+                .collect::<Vec<_>>();
+            match self.predicate.ty {
+                PredicateType::OrderdStatic { .. } |
+                PredicateType::UnorderedStatic { .. } => {
+                    let (result, cached) = stmt.query_map_named(&ref_params, |row| {
+                            self.output_params
+                                .iter()
+                                .enumerate()
+                                .fold((result.clone(), Vec::new()),
+                                      |(result, mut values), (i, ty)| {
+                                          let value = get_res(row, i as i32, ty);
+                                          values.push(value.clone());
+                                          (result.insert_parameter((self.idx, i), value), values)
+                                      })
+                        })
+                        .unwrap()
+                        .map(Result::unwrap)
+                        .unzip();
+                    self.cache.lock().unwrap().insert(key, CacheEntry::Values(cached));
+                    result
+                }
+                PredicateType::StaticAggregate { .. } => {
+                    let (result, values) = stmt.query_map_named(&ref_params, |row| {
+                            let value = get_res(row, 1, &self.output_params[0]);
+                            (result.clone().insert_parameter((self.idx, 0), value.clone()), value)
+                        })
+                        .unwrap()
+                        .map(Result::unwrap)
+                        .unzip();
+                    self.cache.lock().unwrap().insert(key, CacheEntry::Values(vec![values]));
+                    result
+                }
+                PredicateType::StaticNegation { .. } => {
+                    let exists = stmt.query_named(&ref_params).unwrap().next().is_some();
+                    self.cache.lock().unwrap().insert(key, CacheEntry::Exists(exists));
+                    if !exists { vec![result.clone()] } else { Vec::new() }
+                }
+                _ => unreachable!(),
             }
-            PredicateType::StaticAggregate { .. } => {
-                stmt.query_map_named(&ref_params, |row| {
-                        let value = get_res(row, 1, &self.output_params[0]);
-                        result.clone().insert_parameter((self.idx, 0), value)
-                    })
-                    .unwrap()
-                    .map(Result::unwrap)
-                    .collect()
-            }
-            PredicateType::StaticNegation { .. } => {
-                let exists = stmt.query_named(&ref_params).unwrap().next().is_some();
-                if !exists { vec![result.clone()] } else { Vec::new() }
-            }
-            _ => unreachable!(),
-        }
+        })
     }
 }

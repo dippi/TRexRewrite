@@ -1,9 +1,10 @@
+use std::sync::{Arc, Mutex};
 use tesla::{Rule, TupleDeclaration};
 use tesla::expressions::BasicType;
 use tesla::predicates::Predicate;
 use trex::FnvHashMap;
 use trex::stacks::{EventProcessor, RuleStacks, Stack, Trigger};
-use trex::sqldriver::SQLiteDriver;
+use trex::sqldriver::{Cache as SQLiteCache, SQLiteDriver};
 use linear_map::LinearMap;
 use r2d2::{Config, Pool};
 use r2d2_sqlite::SqliteConnectionManager;
@@ -34,13 +35,17 @@ impl NodeProvider for StackProvider {
 
 struct SqliteProvider {
     pool: Pool<SqliteConnectionManager>,
+    cache: Arc<Mutex<SQLiteCache>>,
 }
 
 impl SqliteProvider {
     fn new() -> Self {
         let config = Config::builder().pool_size(10).build();
         let manager = SqliteConnectionManager::new("./database.db");
-        SqliteProvider { pool: Pool::new(config, manager).unwrap() }
+        SqliteProvider {
+            pool: Pool::new(config, manager).unwrap(),
+            cache: Arc::new(Mutex::new(SQLiteCache::new(100))),
+        }
     }
 }
 
@@ -51,7 +56,12 @@ impl NodeProvider for SqliteProvider {
                predicate: &Predicate,
                parameters_ty: &LinearMap<(usize, usize), BasicType>)
                -> Option<Box<EventProcessor>> {
-        SQLiteDriver::new(idx, tuple, predicate, parameters_ty, self.pool.clone())
+        SQLiteDriver::new(idx,
+                          tuple,
+                          predicate,
+                          parameters_ty,
+                          self.pool.clone(),
+                          self.cache.clone())
             .map(Box::new)
             .map(|it| it as Box<EventProcessor>)
     }

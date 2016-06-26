@@ -10,6 +10,8 @@ r2d2_sqlite = "^0.1"
 threadpool = "^1"
 linear-map = "^1"
 fnv = "^1"
+lru-cache = "0.0.7"
+ordered-float = "^0.2"
 
 [dev-dependencies]
 rand = "^0.3"

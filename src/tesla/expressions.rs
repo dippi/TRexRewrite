@@ -1,3 +1,6 @@
+use std::hash::{Hash, Hasher};
+use ordered_float::NotNaN;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BasicType {
     Int,
@@ -143,6 +146,32 @@ impl Value {
         }
     }
 }
+
+impl Hash for Value {
+    fn hash<H>(&self, state: &mut H)
+        where H: Hasher
+    {
+        match *self {
+            Value::Int(x) => x.hash(state),
+            Value::Float(x) => NotNaN::from(x).hash(state),
+            Value::Bool(x) => x.hash(state),
+            Value::Str(ref x) => x.hash(state),
+        }
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (&Value::Int(x), &Value::Int(y)) => x.eq(&y),
+            (&Value::Float(x), &Value::Float(y)) => NotNaN::from(x).eq(&NotNaN::from(y)),
+            (&Value::Bool(x), &Value::Bool(y)) => x.eq(&y),
+            (&Value::Str(ref x), &Value::Str(ref y)) => x.eq(y),
+            _ => false,
+        }
+    }
+}
+impl Eq for Value {}
 
 impl Expression {
     pub fn is_local(&self) -> bool {
