@@ -182,7 +182,7 @@ impl SQLiteDriver {
     }
 }
 
-impl Evaluator for SQLiteDriver {
+impl EventProcessor for SQLiteDriver {
     fn evaluate(&self, result: &PartialResult) -> Vec<PartialResult> {
         // TODO handle errors with Result<_, _>
         let conn = self.pool.get().unwrap();

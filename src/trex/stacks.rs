@@ -14,11 +14,14 @@ fn ptr_eq<T>(a: *const T, b: *const T) -> bool {
 }
 
 pub trait EventProcessor {
-    fn process(&mut self, event: &Arc<Event>);
-    fn consume(&mut self, event: &Arc<Event>);
-}
-
-pub trait Evaluator {
+    #[allow(unused_variables)]
+    fn process(&mut self, event: &Arc<Event>) {}
+    #[allow(unused_variables)]
+    fn consume(&mut self, event: &Arc<Event>) {}
+    #[allow(unused_variables)]
+    fn remove_old(&mut self, times: &FnvHashMap<usize, DateTime<UTC>>) -> Option<DateTime<UTC>> {
+        None
+    }
     fn evaluate(&self, result: &PartialResult) -> Vec<PartialResult>;
 }
 
@@ -109,25 +112,6 @@ impl Stack {
         let check_expr = |expr: &Arc<_>| context.evaluate_expression(expr).as_bool().unwrap();
         self.global_exprs.iter().all(check_expr)
     }
-
-    fn remove_old_events(&mut self,
-                         times: &FnvHashMap<usize, DateTime<UTC>>)
-                         -> Option<DateTime<UTC>> {
-        // TODO reason on interval (open vs close)
-        let time = match self.timing.bound {
-            TimingBound::Within { window } => times[&self.timing.upper] - window,
-            TimingBound::Between { lower } => times[&lower],
-        };
-
-        let index = self.events
-            .binary_search_by(|evt| {
-                if evt.time < time { CmpOrd::Less } else { CmpOrd::Greater }
-            })
-            .unwrap_err();
-        self.events.drain(..index);
-
-        self.events.first().map(|evt| evt.time)
-    }
 }
 
 impl EventProcessor for Stack {
@@ -150,9 +134,24 @@ impl EventProcessor for Stack {
         };
         self.events.remove(index);
     }
-}
 
-impl Evaluator for Stack {
+    fn remove_old(&mut self, times: &FnvHashMap<usize, DateTime<UTC>>) -> Option<DateTime<UTC>> {
+        // TODO reason on interval (open vs close)
+        let time = match self.timing.bound {
+            TimingBound::Within { window } => times[&self.timing.upper] - window,
+            TimingBound::Between { lower } => times[&lower],
+        };
+
+        let index = self.events
+            .binary_search_by(|evt| {
+                if evt.time < time { CmpOrd::Less } else { CmpOrd::Greater }
+            })
+            .unwrap_err();
+        self.events.drain(..index);
+
+        self.events.first().map(|evt| evt.time)
+    }
+
     fn evaluate(&self, result: &PartialResult) -> Vec<PartialResult> {
         let upper_time = result.get_time(self.timing.upper);
         let lower_time = match self.timing.bound {
@@ -253,7 +252,7 @@ impl RuleStacks {
         let mut times = FnvHashMap::default();
         times.insert(0, *trigger_time);
         for (&i, stack) in &mut self.stacks {
-            let time = stack.remove_old_events(&times).unwrap_or(*trigger_time);
+            let time = stack.remove_old(&times).unwrap_or(*trigger_time);
             times.insert(i, time);
         }
     }
