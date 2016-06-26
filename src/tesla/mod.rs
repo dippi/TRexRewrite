@@ -2,14 +2,9 @@ pub mod expressions;
 pub mod predicates;
 
 use std::sync::Arc;
-use std::boxed::Box;
-use std::vec::Vec;
-use std::string::String;
-use std::option::Option;
-use std::result::Result;
 use chrono::{DateTime, UTC};
-use self::expressions::{BasicType, Expression, Value};
-use self::predicates::Predicate;
+use tesla::expressions::{BasicType, Expression, Value};
+use tesla::predicates::Predicate;
 
 #[derive(Clone, Debug)]
 pub enum TupleType {
@@ -26,7 +21,7 @@ pub struct AttributeDeclaration {
 #[derive(Clone, Debug)]
 pub struct TupleDeclaration {
     pub ty: TupleType,
-    pub id: usize, // TODO maybe remove it and let the method `declare` return an id
+    pub id: usize,
     pub name: String,
     pub attributes: Vec<AttributeDeclaration>,
 }
@@ -40,7 +35,7 @@ pub struct EventTemplate {
 #[derive(Clone, Debug)]
 pub struct Rule {
     predicates: Vec<Predicate>,
-    filters: Vec<Expression>,
+    filters: Vec<Arc<Expression>>,
     event_template: EventTemplate,
     consuming: Vec<usize>,
 }

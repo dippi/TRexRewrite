@@ -3,7 +3,6 @@ use tesla::expressions::*;
 use tesla::predicates::*;
 use trex::stacks::*;
 use trex::expressions::*;
-use rusqlite::{Connection, Statement};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 

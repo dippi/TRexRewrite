@@ -4,8 +4,7 @@ mod stacks;
 mod operations;
 mod sqldriver;
 
-use tesla::{ClonableIterator, Engine, Event, EventsIterator, Listener, Rule, Tuple,
-            TupleDeclaration};
+use tesla::{Engine, Event, Listener, Rule, TupleDeclaration};
 use std::collections::{BTreeMap, HashMap};
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
@@ -93,11 +92,4 @@ impl Engine for TRex {
     fn unsubscribe(&mut self, listener_id: &usize) -> Option<Box<Listener>> {
         self.listeners.remove(listener_id)
     }
-}
-
-pub type TuplesIterator<'a> = Box<ClonableIterator<'a, Item = &'a Arc<Tuple>> + 'a>;
-
-trait Driver {
-    // fn new(predicate: &Predicate, tuple: &TupleDeclaration) -> Self;
-    fn evaluate<'a>(&mut self, context: ()) -> TuplesIterator<'a>;
 }

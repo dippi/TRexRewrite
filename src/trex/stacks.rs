@@ -3,12 +3,11 @@ use tesla::expressions::*;
 use tesla::predicates::*;
 use std::sync::Arc;
 use std::cmp::Ordering as CmpOrd;
-use std::collections::BTreeMap;
+use linear_map::LinearMap;
 use chrono::{DateTime, UTC};
+use trex::FnvHashMap;
 use trex::expressions::*;
 use trex::aggregators::compute_aggregate;
-
-use trex::FnvHashMap;
 
 fn ptr_eq<T>(a: *const T, b: *const T) -> bool {
     a == b
@@ -33,12 +32,12 @@ impl Trigger {
         Trigger { predicate: predicate.clone() }
     }
 
-    pub fn is_satisfied(&self, context: &CompleteContext) -> bool {
+    fn is_satisfied(&self, context: &CompleteContext) -> bool {
         let check_expr = |expr: &Arc<_>| context.evaluate_expression(expr).as_bool().unwrap();
         self.predicate.tuple.constraints.iter().all(check_expr)
     }
 
-    pub fn evaluate(&self, event: &Arc<Event>) -> Option<PartialResult> {
+    fn evaluate(&self, event: &Arc<Event>) -> Option<PartialResult> {
         if event.tuple.ty_id == self.predicate.tuple.ty_id {
             let res = if let PredicateType::Trigger { ref parameters } = self.predicate.ty {
                 parameters.iter().enumerate().fold(PartialResult::new(), |res, (i, param)| {
@@ -211,7 +210,7 @@ impl Evaluator for Stack {
             }
             PredicateType::EventNegation { .. } => {
                 let check = |evt: &Arc<Event>| {
-                    self.is_globally_satisfied(&CompleteContext::new(&result, &evt.tuple))
+                    self.is_globally_satisfied(&CompleteContext::new(result, &evt.tuple))
                 };
                 if !iterator.any(check) { vec![result.clone()] } else { Vec::new() }
             }
@@ -224,7 +223,7 @@ impl Evaluator for Stack {
 pub struct RuleStacks {
     rule: Rule,
     trigger: Trigger,
-    stacks: BTreeMap<usize, Stack>,
+    stacks: LinearMap<usize, Stack>,
 }
 
 impl RuleStacks {
@@ -238,7 +237,7 @@ impl RuleStacks {
                 .filter_map(|(i, pred)| {
                     Stack::new(i, &declarations[&pred.tuple.ty_id], pred).map(|stack| (i, stack))
                 })
-                .collect::<BTreeMap<usize, Stack>>();
+                .collect::<LinearMap<usize, Stack>>();
 
             (trigger, stacks)
         };
