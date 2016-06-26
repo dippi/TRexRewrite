@@ -13,7 +13,7 @@ fn ptr_eq<T>(a: *const T, b: *const T) -> bool {
     a == b
 }
 
-pub trait EventProcessor {
+pub trait EventProcessor: Send {
     #[allow(unused_variables)]
     fn process(&mut self, event: &Arc<Event>) {}
     #[allow(unused_variables)]
@@ -26,7 +26,7 @@ pub trait EventProcessor {
 }
 
 #[derive(Clone, Debug)]
-struct Trigger {
+pub struct Trigger {
     predicate: Predicate,
 }
 
@@ -63,7 +63,7 @@ impl Trigger {
 }
 
 #[derive(Clone, Debug)]
-struct Stack {
+pub struct Stack {
     idx: usize,
     tuple: TupleDeclaration,
     predicate: Predicate,
@@ -74,7 +74,7 @@ struct Stack {
 }
 
 impl Stack {
-    fn new(idx: usize, tuple: &TupleDeclaration, predicate: &Predicate) -> Option<Stack> {
+    pub fn new(idx: usize, tuple: &TupleDeclaration, predicate: &Predicate) -> Option<Stack> {
         match predicate.ty {
             PredicateType::Event { ref timing, .. } |
             PredicateType::EventAggregate { ref timing, .. } |
@@ -218,50 +218,38 @@ impl EventProcessor for Stack {
     }
 }
 
-#[derive(Clone, Debug)]
 pub struct RuleStacks {
-    rule: Rule,
     trigger: Trigger,
-    stacks: LinearMap<usize, Stack>,
+    processors: LinearMap<usize, Box<EventProcessor>>,
+    rule: Rule,
 }
 
 impl RuleStacks {
-    pub fn new(rule: Rule, declarations: &FnvHashMap<usize, TupleDeclaration>) -> Self {
-        let (trigger, stacks) = {
-            let trigger = Trigger::new(&rule.predicates[0]);
-
-            let stacks = rule.predicates
-                .iter()
-                .enumerate()
-                .filter_map(|(i, pred)| {
-                    Stack::new(i, &declarations[&pred.tuple.ty_id], pred).map(|stack| (i, stack))
-                })
-                .collect::<LinearMap<usize, Stack>>();
-
-            (trigger, stacks)
-        };
-
+    pub fn new(trigger: Trigger,
+               processors: LinearMap<usize, Box<EventProcessor>>,
+               rule: Rule)
+               -> Self {
         RuleStacks {
-            rule: rule,
             trigger: trigger,
-            stacks: stacks,
+            processors: processors,
+            rule: rule,
         }
     }
 
     fn remove_old_events(&mut self, trigger_time: &DateTime<UTC>) {
         let mut times = FnvHashMap::default();
         times.insert(0, *trigger_time);
-        for (&i, stack) in &mut self.stacks {
-            let time = stack.remove_old(&times).unwrap_or(*trigger_time);
+        for (&i, processor) in &mut self.processors {
+            let time = processor.remove_old(&times).unwrap_or(*trigger_time);
             times.insert(i, time);
         }
     }
 
     fn get_partial_results(&self, initial: PartialResult) -> Vec<PartialResult> {
-        self.stacks
+        self.processors
             .iter()
-            .fold(vec![initial], |previous, (_, stack)| {
-                previous.iter().flat_map(|res| stack.evaluate(res)).collect()
+            .fold(vec![initial], |previous, (_, evaluator)| {
+                previous.iter().flat_map(|res| evaluator.evaluate(res)).collect()
                 // TODO maybe interrupt fold if prev is empty (combo scan + take_while + last)
             })
     }
@@ -288,8 +276,8 @@ impl RuleStacks {
     }
 
     pub fn process(&mut self, event: &Arc<Event>) -> Vec<Arc<Event>> {
-        for (_, stack) in &mut self.stacks {
-            stack.process(event);
+        for (_, processor) in &mut self.processors {
+            processor.process(event);
         }
 
         if let Some(initial) = self.trigger.evaluate(event) {

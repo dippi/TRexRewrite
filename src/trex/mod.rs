@@ -4,6 +4,7 @@ mod stacks;
 mod operations;
 mod sqldriver;
 mod typeinference;
+mod providers;
 
 use tesla::{Engine, Event, Listener, Rule, TupleDeclaration};
 use std::collections::{BTreeMap, HashMap};
@@ -16,11 +17,13 @@ use threadpool::ThreadPool;
 use fnv::FnvHasher;
 use trex::typeinference::check_rule;
 use trex::stacks::*;
+use trex::providers::GeneralProvider;
 
 pub type FnvHashMap<K, V> = HashMap<K, V, BuildHasherDefault<FnvHasher>>;
 
 pub struct TRex {
     tuples: FnvHashMap<usize, TupleDeclaration>,
+    provider: GeneralProvider,
     reverse_index: FnvHashMap<usize, Vec<Arc<Mutex<RuleStacks>>>>,
     listeners: BTreeMap<usize, Box<Listener>>,
     last_id: usize,
@@ -32,6 +35,7 @@ impl TRex {
     pub fn new() -> TRex {
         TRex {
             tuples: FnvHashMap::default(),
+            provider: GeneralProvider::new(),
             reverse_index: FnvHashMap::default(),
             listeners: BTreeMap::new(),
             last_id: 0,
@@ -51,14 +55,14 @@ impl Engine for TRex {
     }
     fn define(&mut self, rule: Rule) {
         // TODO handle error with result
-        check_rule(&rule, &self.tuples).unwrap();
+        let param_types = check_rule(&rule, &self.tuples).unwrap();
 
         let mut pred_ty_ids =
             rule.predicates.iter().map(|pred| pred.tuple.ty_id).collect::<Vec<_>>();
         pred_ty_ids.sort();
         pred_ty_ids.dedup();
 
-        let stack = Arc::new(Mutex::new(RuleStacks::new(rule, &self.tuples)));
+        let stack = Arc::new(Mutex::new(self.provider.provide(rule, &self.tuples, &param_types)));
         for idx in pred_ty_ids {
             self.reverse_index.entry(idx).or_insert_with(Vec::new).push(stack.clone());
         }
