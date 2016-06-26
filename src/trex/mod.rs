@@ -53,7 +53,7 @@ impl Engine for TRex {
         // expressions refereces ranges and types,
         // emit complete assignment and correct types)
         let mut pred_ty_ids =
-            rule.predicates().iter().map(|pred| pred.tuple.ty_id).collect::<Vec<_>>();
+            rule.predicates.iter().map(|pred| pred.tuple.ty_id).collect::<Vec<_>>();
         pred_ty_ids.sort();
         pred_ty_ids.dedup();
 

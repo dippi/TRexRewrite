@@ -229,10 +229,10 @@ pub struct RuleStacks {
 impl RuleStacks {
     pub fn new(rule: Rule, declarations: &FnvHashMap<usize, TupleDeclaration>) -> Self {
         let (trigger, stacks) = {
-            let predicates = rule.predicates();
-            let trigger = Trigger::new(&predicates[0]);
+            let trigger = Trigger::new(&rule.predicates[0]);
 
-            let stacks = predicates.iter()
+            let stacks = rule.predicates
+                .iter()
                 .enumerate()
                 .filter_map(|(i, pred)| {
                     Stack::new(i, &declarations[&pred.tuple.ty_id], pred).map(|stack| (i, stack))
@@ -273,7 +273,7 @@ impl RuleStacks {
         results.into_iter()
             .map(|res| {
                 let context = CompleteContext::new(res, ());
-                let template = self.rule.event_template();
+                let template = &self.rule.event_template;
                 Arc::new(Event {
                     tuple: Tuple {
                         ty_id: template.ty_id,
@@ -300,7 +300,7 @@ impl RuleStacks {
             let filtered = partial_results.iter().filter(|res| {
                 let context = CompleteContext::new(res, ());
                 self.rule
-                    .filters()
+                    .filters
                     .iter()
                     .all(|expr| context.evaluate_expression(expr).as_bool().unwrap())
             });

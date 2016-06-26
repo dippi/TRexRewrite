@@ -34,42 +34,10 @@ pub struct EventTemplate {
 
 #[derive(Clone, Debug)]
 pub struct Rule {
-    predicates: Vec<Predicate>,
-    filters: Vec<Arc<Expression>>,
-    event_template: EventTemplate,
-    consuming: Vec<usize>,
-}
-
-impl Rule {
-    pub fn new(predicates: Vec<Predicate>,
-               filters: Vec<Expression>,
-               event_template: EventTemplate,
-               consuming: Vec<usize>)
-               -> Result<Rule, String> {
-        // TODO check for rule validity
-        // (Parameters definition and usage,
-        // aggregate expr can appear only
-        // in aggregate parameter definitions,
-        // and consuming ranges validity)
-        Ok(Rule {
-            predicates: predicates,
-            filters: filters,
-            event_template: event_template,
-            consuming: consuming,
-        })
-    }
-    pub fn predicates(&self) -> &Vec<Predicate> {
-        &self.predicates
-    }
-    pub fn filters(&self) -> &Vec<Expression> {
-        &self.filters
-    }
-    pub fn event_template(&self) -> &EventTemplate {
-        &self.event_template
-    }
-    pub fn consuming(&self) -> &Vec<usize> {
-        &self.consuming
-    }
+    pub predicates: Vec<Predicate>,
+    pub filters: Vec<Arc<Expression>>,
+    pub event_template: EventTemplate,
+    pub consuming: Vec<usize>,
 }
 
 #[derive(Clone, Debug)]

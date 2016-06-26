@@ -109,7 +109,12 @@ fn generate_length_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
             attributes: Vec::new(),
         };
         let consuming = if cfg.consuming { vec![1] } else { Vec::new() };
-        let rule = Rule::new(predicates, Vec::new(), event_template, consuming).unwrap();
+        let rule = Rule {
+            predicates: predicates,
+            filters: Vec::new(),
+            event_template: event_template,
+            consuming: consuming,
+        };
         rules.push(rule);
     }
     rules
