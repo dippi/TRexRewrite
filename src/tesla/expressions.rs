@@ -132,3 +132,49 @@ impl From<Value> for Option<String> {
         if let Value::Str(x) = val { Some(x) } else { None }
     }
 }
+
+impl Value {
+    pub fn get_type(&self) -> BasicType {
+        match *self {
+            Value::Int(_) => BasicType::Int,
+            Value::Float(_) => BasicType::Float,
+            Value::Bool(_) => BasicType::Bool,
+            Value::Str(_) => BasicType::Str,
+        }
+    }
+}
+
+impl Expression {
+    pub fn is_local(&self) -> bool {
+        // TODO maybe take into account local parameters that don't alter expression locality
+        match *self {
+            Expression::Parameter { .. } => false,
+            Expression::Cast { ref expression, .. } |
+            Expression::UnaryOperation { ref expression, .. } => expression.is_local(),
+            Expression::BinaryOperation { ref left, ref right, .. } => {
+                left.is_local() && right.is_local()
+            }
+            _ => true,
+        }
+    }
+
+    pub fn get_parameters(&self) -> Vec<(usize, usize)> {
+        match *self {
+            Expression::Parameter { predicate, parameter } => vec![(predicate, parameter)],
+            Expression::Cast { ref expression, .. } |
+            Expression::UnaryOperation { ref expression, .. } => expression.get_parameters(),
+            Expression::BinaryOperation { ref left, ref right, .. } => {
+                let mut res = left.get_parameters();
+                res.append(&mut right.get_parameters());
+                res.sort();
+                res.dedup();
+                res
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    pub fn get_last_predicate(&self) -> Option<usize> {
+        self.get_parameters().last().map(|&(pred, _)| pred)
+    }
+}

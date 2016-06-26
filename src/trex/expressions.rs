@@ -3,7 +3,6 @@ use tesla::expressions::*;
 use chrono::{DateTime, UTC};
 use linear_map::LinearMap;
 use std::sync::Arc;
-use std::cmp::max;
 use trex::operations::*;
 
 impl Value {
@@ -15,36 +14,6 @@ impl Value {
     }
     pub fn as_bool(&self) -> Option<bool> {
         if let Value::Bool(value) = *self { Some(value) } else { None }
-    }
-}
-
-impl Expression {
-    pub fn is_local(&self) -> bool {
-        // TODO maybe take into account local parameters that don't alter expression locality
-        match *self {
-            Expression::Parameter { .. } => false,
-            Expression::Cast { ref expression, .. } |
-            Expression::UnaryOperation { ref expression, .. } => expression.is_local(),
-            Expression::BinaryOperation { ref left, ref right, .. } => {
-                left.is_local() && right.is_local()
-            }
-            _ => true,
-        }
-    }
-
-    pub fn get_last_predicate(&self) -> Option<usize> {
-        match *self {
-            Expression::Parameter { predicate, .. } => Some(predicate),
-            Expression::Cast { ref expression, .. } |
-            Expression::UnaryOperation { ref expression, .. } => expression.get_last_predicate(),
-            Expression::BinaryOperation { ref left, ref right, .. } => {
-                match (left.get_last_predicate(), right.get_last_predicate()) {
-                    (Some(lpred), Some(rpred)) => Some(max(lpred, rpred)),
-                    (lpred, rpred) => lpred.or(rpred),
-                }
-            }
-            _ => None,
-        }
     }
 }
 
