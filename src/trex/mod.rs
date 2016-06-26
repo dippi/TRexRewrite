@@ -6,6 +6,7 @@ mod sqldriver;
 
 use tesla::{Engine, Event, Listener, Rule, TupleDeclaration};
 use std::collections::{BTreeMap, HashMap};
+use std::collections::hash_map::Entry;
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -40,7 +41,11 @@ impl TRex {
 
 impl Engine for TRex {
     fn declare(&mut self, tuple: TupleDeclaration) {
-        self.tuples.insert(tuple.id, tuple);
+        if let Entry::Vacant(entry) = self.tuples.entry(tuple.id) {
+            entry.insert(tuple);
+        } else {
+            panic!("Tuple already declared!");
+        }
     }
     fn define(&mut self, rule: Rule) {
         // TODO check for rule validity
