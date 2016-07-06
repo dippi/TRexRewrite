@@ -1,9 +1,9 @@
 mod expressions;
-mod aggregators;
-mod stacks;
+mod stack;
+mod rule_processor;
 mod operations;
-mod sqldriver;
-mod typeinference;
+mod sqlite;
+mod types;
 mod providers;
 
 use tesla::{Engine, Event, Listener, Rule, TupleDeclaration};
@@ -15,8 +15,8 @@ use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use threadpool::ThreadPool;
 use fnv::FnvHasher;
-use trex::typeinference::check_rule;
-use trex::stacks::*;
+use trex::types::check_rule;
+use trex::rule_processor::*;
 use trex::providers::GeneralProvider;
 
 pub type FnvHashMap<K, V> = HashMap<K, V, BuildHasherDefault<FnvHasher>>;

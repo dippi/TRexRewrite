@@ -1,8 +1,6 @@
 use tesla::*;
 use tesla::expressions::*;
-use chrono::{DateTime, UTC};
-use linear_map::LinearMap;
-use std::sync::Arc;
+use trex::rule_processor::PartialResult;
 use trex::operations::*;
 
 impl Value {
@@ -14,38 +12,6 @@ impl Value {
     }
     pub fn as_bool(&self) -> Option<bool> {
         if let Value::Bool(value) = *self { Some(value) } else { None }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct PartialResult {
-    parameters: LinearMap<(usize, usize), Value>,
-    events: LinearMap<usize, Arc<Event>>,
-}
-
-impl PartialResult {
-    pub fn new() -> Self {
-        PartialResult {
-            parameters: LinearMap::new(),
-            events: LinearMap::new(),
-        }
-    }
-
-    #[inline(always)]
-    pub fn insert_event(mut self, idx: usize, event: Arc<Event>) -> Self {
-        self.events.insert(idx, event);
-        self
-    }
-
-    #[inline(always)]
-    pub fn insert_parameter(mut self, idx: (usize, usize), parameter: Value) -> Self {
-        self.parameters.insert(idx, parameter);
-        self
-    }
-
-    #[inline(always)]
-    pub fn get_time(&self, index: usize) -> DateTime<UTC> {
-        self.events[&index].time
     }
 }
 
@@ -164,6 +130,6 @@ impl<'a> EvaluationContext for CompleteContext<'a> {
     }
 
     fn get_parameter(&self, predicate: usize, parameter: usize) -> Value {
-        self.result.parameters[&(predicate, parameter)].clone()
+        self.result.get_parameter((predicate, parameter)).clone()
     }
 }
