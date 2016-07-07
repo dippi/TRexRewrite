@@ -74,16 +74,16 @@ pub enum Expression {
 // TODO think about utility of the following functions
 
 impl Value {
-    pub fn extract_int(&self) -> i32 {
+    pub fn unwrap_int(&self) -> i32 {
         if let Value::Int(value) = *self { value } else { panic!("Wrong Value unwrap") }
     }
-    pub fn extract_float(&self) -> f32 {
+    pub fn unwrap_float(&self) -> f32 {
         if let Value::Float(value) = *self { value } else { panic!("Wrong Value unwrap") }
     }
-    pub fn extract_bool(&self) -> bool {
+    pub fn unwrap_bool(&self) -> bool {
         if let Value::Bool(value) = *self { value } else { panic!("Wrong Value unwrap") }
     }
-    pub fn extract_string(&self) -> String {
+    pub fn unwrap_string(&self) -> String {
         if let Value::Str(ref value) = *self { value.clone() } else { panic!("Wrong Value unwrap") }
     }
 }
@@ -112,30 +112,6 @@ impl From<String> for Value {
     }
 }
 
-impl From<Value> for Option<i32> {
-    fn from(val: Value) -> Self {
-        if let Value::Int(x) = val { Some(x) } else { None }
-    }
-}
-
-impl From<Value> for Option<f32> {
-    fn from(val: Value) -> Self {
-        if let Value::Float(x) = val { Some(x) } else { None }
-    }
-}
-
-impl From<Value> for Option<bool> {
-    fn from(val: Value) -> Self {
-        if let Value::Bool(x) = val { Some(x) } else { None }
-    }
-}
-
-impl From<Value> for Option<String> {
-    fn from(val: Value) -> Self {
-        if let Value::Str(x) = val { Some(x) } else { None }
-    }
-}
-
 impl Value {
     pub fn get_type(&self) -> BasicType {
         match *self {
@@ -148,9 +124,7 @@ impl Value {
 }
 
 impl Hash for Value {
-    fn hash<H>(&self, state: &mut H)
-        where H: Hasher
-    {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         match *self {
             Value::Int(x) => x.hash(state),
             Value::Float(x) => NotNaN::from(x).hash(state),

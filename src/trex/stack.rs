@@ -1,15 +1,14 @@
-mod aggregators;
-
 use tesla::{Event, TupleDeclaration};
 use tesla::expressions::*;
 use tesla::predicates::*;
 use std::sync::Arc;
 use std::cmp::Ordering as CmpOrd;
 use chrono::{DateTime, UTC};
-use trex::FnvHashMap;
+use linear_map::LinearMap;
+use trex::{FnvHashMap, NodeProvider};
 use trex::rule_processor::{EventProcessor, PartialResult};
-use trex::expressions::*;
-use self::aggregators::compute_aggregate;
+use trex::expressions::evaluation::*;
+use trex::aggregators::compute_aggregate;
 
 fn ptr_eq<T>(a: *const T, b: *const T) -> bool {
     a == b
@@ -56,13 +55,13 @@ impl Stack {
         event.tuple.ty_id == self.predicate.tuple.ty_id &&
         {
             let context = SimpleContext::new(&event.tuple);
-            let check_expr = |expr: &Arc<_>| context.evaluate_expression(expr).as_bool().unwrap();
+            let check_expr = |expr: &Arc<_>| context.evaluate_expression(expr).unwrap_bool();
             self.local_exprs.iter().all(check_expr)
         }
     }
 
     fn is_globally_satisfied(&self, context: &CompleteContext) -> bool {
-        let check_expr = |expr: &Arc<_>| context.evaluate_expression(expr).as_bool().unwrap();
+        let check_expr = |expr: &Arc<_>| context.evaluate_expression(expr).unwrap_bool();
         self.global_exprs.iter().all(check_expr)
     }
 }
@@ -168,5 +167,18 @@ impl EventProcessor for Stack {
             }
             _ => panic!("Wrong event stack evaluation"),
         }
+    }
+}
+
+pub struct StackProvider;
+
+impl NodeProvider for StackProvider {
+    fn provide(&self,
+               idx: usize,
+               tuple: &TupleDeclaration,
+               predicate: &Predicate,
+               _: &LinearMap<(usize, usize), BasicType>)
+               -> Option<Box<EventProcessor>> {
+        Stack::new(idx, tuple, predicate).map(Box::new).map(|it| it as Box<EventProcessor>)
     }
 }

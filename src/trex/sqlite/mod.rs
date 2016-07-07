@@ -3,14 +3,15 @@ mod query_builder;
 use tesla::*;
 use tesla::expressions::*;
 use tesla::predicates::*;
+use trex::NodeProvider;
 use trex::rule_processor::*;
-use trex::expressions::*;
+use trex::expressions::evaluation::*;
 use self::query_builder::SqlContext;
 use linear_map::LinearMap;
 use lru_cache::LruCache;
 use rusqlite::Row;
 use rusqlite::types::{ToSql, Value as SqlValue};
-use r2d2::Pool;
+use r2d2::{Config, Pool};
 use r2d2_sqlite::SqliteConnectionManager;
 use std::sync::{Arc, Mutex};
 
@@ -194,5 +195,39 @@ impl EventProcessor for SQLiteDriver {
                 _ => unreachable!(),
             }
         })
+    }
+}
+
+pub struct SqliteProvider {
+    pool: Pool<SqliteConnectionManager>,
+    cache: Arc<Mutex<Cache>>,
+}
+
+impl SqliteProvider {
+    pub fn new() -> Self {
+        let config = Config::builder().pool_size(10).build();
+        let manager = SqliteConnectionManager::new("./database.db");
+        SqliteProvider {
+            pool: Pool::new(config, manager).unwrap(),
+            cache: Arc::new(Mutex::new(Cache::new(100))),
+        }
+    }
+}
+
+impl NodeProvider for SqliteProvider {
+    fn provide(&self,
+               idx: usize,
+               tuple: &TupleDeclaration,
+               predicate: &Predicate,
+               parameters_ty: &LinearMap<(usize, usize), BasicType>)
+               -> Option<Box<EventProcessor>> {
+        SQLiteDriver::new(idx,
+                          tuple,
+                          predicate,
+                          parameters_ty,
+                          self.pool.clone(),
+                          self.cache.clone())
+            .map(Box::new)
+            .map(|it| it as Box<EventProcessor>)
     }
 }

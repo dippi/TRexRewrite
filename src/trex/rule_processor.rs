@@ -5,7 +5,7 @@ use std::sync::Arc;
 use linear_map::LinearMap;
 use chrono::{DateTime, UTC};
 use trex::FnvHashMap;
-use trex::expressions::*;
+use trex::expressions::evaluation::*;
 
 #[derive(Clone, Debug)]
 pub struct PartialResult {
@@ -66,7 +66,7 @@ impl Trigger {
     }
 
     fn is_satisfied(&self, context: &CompleteContext) -> bool {
-        let check_expr = |expr: &Arc<_>| context.evaluate_expression(expr).as_bool().unwrap();
+        let check_expr = |expr: &Arc<_>| context.evaluate_expression(expr).unwrap_bool();
         self.predicate.tuple.constraints.iter().all(check_expr)
     }
 
@@ -163,7 +163,7 @@ impl RuleStacks {
                 self.rule
                     .filters
                     .iter()
-                    .all(|expr| context.evaluate_expression(expr).as_bool().unwrap())
+                    .all(|expr| context.evaluate_expression(expr).unwrap_bool())
             });
             // TODO consuming clause
             self.generate_events(event, filtered)

@@ -1,63 +1,10 @@
 use linear_map::LinearMap;
 use tesla::expressions::*;
 use tesla::TupleDeclaration;
+use super::operations::{binary, unary};
 
 // TODO improve error handling and more informative failure,
 // or switch completely to a panic!() approach and defer checks to parser
-
-mod unary {
-    use tesla::expressions::{BasicType, UnaryOperator};
-
-    pub fn get_type(operator: &UnaryOperator, ty: &BasicType) -> Result<BasicType, String> {
-        match *operator {
-                UnaryOperator::Minus => {
-                    match *ty {
-                        BasicType::Int | BasicType::Float => Some(ty.clone()),
-                        _ => None,
-                    }
-                }
-                UnaryOperator::Not => {
-                    if let BasicType::Bool = *ty { Some(ty.clone()) } else { None }
-                }
-            }
-            .ok_or("Wrong operand type in unary operation".to_owned())
-    }
-}
-
-mod binary {
-    use tesla::expressions::{BasicType, BinaryOperator};
-
-    pub fn get_type(operator: &BinaryOperator,
-                    left: &BasicType,
-                    right: &BasicType)
-                    -> Result<BasicType, String> {
-        match *operator {
-                BinaryOperator::Plus | BinaryOperator::Minus | BinaryOperator::Times |
-                BinaryOperator::Division => {
-                    match (left, right) {
-                        (&BasicType::Int, &BasicType::Int) => Some(BasicType::Int),
-                        (&BasicType::Float, &BasicType::Float) => Some(BasicType::Float),
-                        _ => None,
-                    }
-                }
-                BinaryOperator::Equal | BinaryOperator::NotEqual => {
-                    if left == right { Some(BasicType::Bool) } else { None }
-                }
-                BinaryOperator::GreaterThan |
-                BinaryOperator::GreaterEqual |
-                BinaryOperator::LowerThan |
-                BinaryOperator::LowerEqual => {
-                    match (left, right) {
-                        (&BasicType::Int, &BasicType::Int) |
-                        (&BasicType::Float, &BasicType::Float) |
-                        (&BasicType::Str, &BasicType::Str) => Some(BasicType::Bool),
-                        _ => None,
-                    }
-                }
-            }
-            .ok_or("Wrong operands type in binary operation".to_owned())
-    }
-}
 
 #[derive(Clone, Debug)]
 pub enum CurrentType<'a> {

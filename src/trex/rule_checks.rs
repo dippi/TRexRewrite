@@ -1,12 +1,10 @@
-mod inference;
-
 use std::sync::Arc;
 use linear_map::LinearMap;
 use tesla::expressions::*;
 use tesla::predicates::*;
 use tesla::{EventTemplate, Rule, TupleDeclaration, TupleType};
 use trex::FnvHashMap;
-use self::inference::{InferenceContext, CurrentType};
+use trex::expressions::inference::{CurrentType, InferenceContext};
 
 // TODO improve error handling and more informative failure,
 // or switch completely to a panic!() approach and defer checks to parser

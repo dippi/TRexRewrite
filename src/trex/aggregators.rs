@@ -14,12 +14,12 @@ fn compute_average<'a, T, U>(iterator: T,
 {
     match attributes[attr].ty {
         BasicType::Int => {
-            let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_int());
+            let mapped = iterator.map(|evt| evt.tuple.data[attr].unwrap_int());
             let (count, sum) = mapped.fold((0i32, 0), |acc, x| (acc.0 + 1, acc.1 + x));
             if count > 0 { Some(Value::from(sum as f32 / count as f32)) } else { None }
         }
         BasicType::Float => {
-            let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_float());
+            let mapped = iterator.map(|evt| evt.tuple.data[attr].unwrap_float());
             let (count, sum) = mapped.fold((0i32, 0.0), |acc, x| (acc.0 + 1, acc.1 + x));
             if count > 0 { Some(Value::from(sum / count as f32)) } else { None }
         }
@@ -36,11 +36,11 @@ fn compute_sum<'a, T, U>(iterator: T,
 {
     match attributes[attr].ty {
         BasicType::Int => {
-            let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_int());
+            let mapped = iterator.map(|evt| evt.tuple.data[attr].unwrap_int());
             Some(Value::from(mapped.fold(0, Add::add)))
         }
         BasicType::Float => {
-            let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_float());
+            let mapped = iterator.map(|evt| evt.tuple.data[attr].unwrap_float());
             Some(Value::from(mapped.fold(0.0, Add::add)))
         }
         _ => panic!("Tring to compute aggregate on wrong Value type"),
@@ -56,11 +56,11 @@ fn compute_min<'a, T, U>(iterator: T,
 {
     match attributes[attr].ty {
         BasicType::Int => {
-            let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_int());
+            let mapped = iterator.map(|evt| evt.tuple.data[attr].unwrap_int());
             mapped.min().map(Value::from)
         }
         BasicType::Float => {
-            let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_float());
+            let mapped = iterator.map(|evt| evt.tuple.data[attr].unwrap_float());
             let min = mapped.fold(f32::NAN, f32::min);
             if !min.is_nan() { Some(Value::from(min)) } else { None }
         }
@@ -77,11 +77,11 @@ fn compute_max<'a, T, U>(iterator: T,
 {
     match attributes[attr].ty {
         BasicType::Int => {
-            let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_int());
+            let mapped = iterator.map(|evt| evt.tuple.data[attr].unwrap_int());
             mapped.max().map(Value::from)
         }
         BasicType::Float => {
-            let mapped = iterator.map(|evt| evt.tuple.data[attr].extract_float());
+            let mapped = iterator.map(|evt| evt.tuple.data[attr].unwrap_float());
             let max = mapped.fold(f32::NAN, f32::max);
             if !max.is_nan() { Some(Value::from(max)) } else { None }
         }

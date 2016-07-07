@@ -1,17 +1,12 @@
 use tesla::*;
 use tesla::expressions::*;
 use trex::rule_processor::PartialResult;
-use trex::operations::*;
+use super::operations::{binary, unary};
 
-impl Value {
-    fn cast(&self, ty: &BasicType) -> Value {
-        match (ty, self) {
-            (&BasicType::Float, &Value::Int(val)) => Value::Float(val as f32),
-            _ => panic!("Wrong casting"),
-        }
-    }
-    pub fn as_bool(&self) -> Option<bool> {
-        if let Value::Bool(value) = *self { Some(value) } else { None }
+fn cast(value: &Value, ty: &BasicType) -> Value {
+    match (ty, value) {
+        (&BasicType::Float, &Value::Int(val)) => Value::Float(val as f32),
+        _ => panic!("Wrong casting"),
     }
 }
 
@@ -31,15 +26,15 @@ pub trait EvaluationContext {
                 self.get_parameter(predicate, parameter)
             }
             Expression::Cast { ref ty, ref expression } => {
-                self.evaluate_expression(expression).cast(ty)
+                cast(&self.evaluate_expression(expression), ty)
             }
             Expression::UnaryOperation { ref operator, ref expression } => {
-                unary::apply(operator, &self.evaluate_expression(expression))
+                unary::evaluate(operator, &self.evaluate_expression(expression))
             }
             Expression::BinaryOperation { ref operator, ref left, ref right } => {
-                binary::apply(operator,
-                              &self.evaluate_expression(left),
-                              &self.evaluate_expression(right))
+                binary::evaluate(operator,
+                                 &self.evaluate_expression(left),
+                                 &self.evaluate_expression(right))
             }
         }
     }

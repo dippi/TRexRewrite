@@ -1,12 +1,13 @@
 mod expressions;
 mod stack;
 mod rule_processor;
-mod operations;
+mod aggregators;
 mod sqlite;
-mod types;
-mod providers;
+mod rule_checks;
 
 use tesla::{Engine, Event, Listener, Rule, TupleDeclaration};
+use tesla::predicates::Predicate;
+use tesla::expressions::BasicType;
 use std::collections::{BTreeMap, HashMap};
 use std::collections::hash_map::Entry;
 use std::hash::BuildHasherDefault;
@@ -14,12 +15,62 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use threadpool::ThreadPool;
+use linear_map::LinearMap;
 use fnv::FnvHasher;
-use trex::types::check_rule;
+use trex::rule_checks::check_rule;
 use trex::rule_processor::*;
-use trex::providers::GeneralProvider;
+use trex::stack::StackProvider;
+use trex::sqlite::SqliteProvider;
 
 pub type FnvHashMap<K, V> = HashMap<K, V, BuildHasherDefault<FnvHasher>>;
+
+trait NodeProvider {
+    fn provide(&self,
+               idx: usize,
+               tuple: &TupleDeclaration,
+               predicate: &Predicate,
+               parameters_ty: &LinearMap<(usize, usize), BasicType>)
+               -> Option<Box<EventProcessor>>;
+}
+
+struct GeneralProvider {
+    providers: Vec<Box<NodeProvider>>,
+}
+
+impl GeneralProvider {
+    fn new() -> Self {
+        // TODO generalise provider architecture to allow custom nodes and node providers
+        GeneralProvider {
+            providers: vec![
+                Box::new(StackProvider),
+                Box::new(SqliteProvider::new()),
+            ],
+        }
+    }
+
+    fn provide(&self,
+               rule: Rule,
+               tuples: &FnvHashMap<usize, TupleDeclaration>,
+               parameters_ty: &LinearMap<(usize, usize), BasicType>)
+               -> RuleStacks {
+        let trigger = Trigger::new(&rule.predicates[0]);
+        let processors = rule.predicates
+            .iter()
+            .enumerate()
+            .skip(1)
+            .map(|(i, predicate)| {
+                let tuple = &tuples[&predicate.tuple.ty_id];
+                let processor = self.providers
+                    .iter()
+                    .filter_map(|provider| provider.provide(i, tuple, &predicate, parameters_ty))
+                    .next()
+                    .expect("No suitable processor");
+                (i, processor)
+            })
+            .collect();
+        RuleStacks::new(trigger, processors, rule)
+    }
+}
 
 pub struct TRex {
     tuples: FnvHashMap<usize, TupleDeclaration>,
