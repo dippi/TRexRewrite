@@ -4,7 +4,7 @@ mod rule_processor;
 mod aggregators;
 mod sqlite;
 mod rule_checks;
-mod caches;
+mod cache;
 
 use tesla::{Engine, Event, Listener, Rule, TupleDeclaration};
 use tesla::predicates::Predicate;
