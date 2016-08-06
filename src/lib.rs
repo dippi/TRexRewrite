@@ -7,6 +7,7 @@ extern crate linear_map;
 extern crate fnv;
 extern crate lru_cache;
 extern crate ordered_float;
+extern crate owning_ref;
 
 pub mod tesla;
 pub mod trex;

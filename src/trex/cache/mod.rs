@@ -2,12 +2,14 @@ mod ownable;
 mod gdfs_cache;
 
 use self::ownable::Ownable;
-use self::gdfs_cache::{GDSFCache, HasSize, HasCost};
+use self::gdfs_cache::{GDSFCache, HasCost, HasSize};
 use std::borrow::Borrow;
 use std::marker::PhantomData;
 use std::hash::{BuildHasher, Hash, Hasher};
-use std::collections::hash_map::{HashMap, Entry};
+use std::collections::hash_map::{Entry, HashMap};
+use std::sync::{Mutex, MutexGuard};
 use lru_cache::LruCache;
+use owning_ref::MutexGuardRefMut;
 
 pub trait Cache {
     type K;
@@ -18,67 +20,60 @@ pub trait Cache {
     fn remove(&mut self, k: &Self::K) -> Option<Self::V>;
 }
 
-pub enum FetchedValue<'a, T: 'a> {
-    Cached(&'a mut T),
-    Uncached(T),
+enum FetchedValue<'a, C: Cache + 'a> {
+    Cached(MutexGuardRefMut<'a, C, C::V>),
+    Uncached(C::V),
 }
 
-pub trait Fetcher {
-    type K;
-    type V;
-    fn fetch<Q>(&mut self, key: Q) -> FetchedValue<Self::V>
-        where Q: Borrow<Self::K> + Ownable<Self::K>;
-}
-
-pub struct LambdaFetcher<C, F>
+pub struct Fetcher<C, F>
     where C: Cache,
           F: Fn(&C::K) -> C::V
 {
-    cache: C,
+    cache: Mutex<C>,
     fetch: F,
 }
 
-impl<C, F> LambdaFetcher<C, F>
+impl<C, F> Fetcher<C, F>
     where C: Cache + Default,
           F: Fn(&C::K) -> C::V
 {
     fn new(fetch: F) -> Self {
-        LambdaFetcher {
-            cache: C::default(),
+        Fetcher {
+            cache: Mutex::default(),
             fetch: fetch,
         }
     }
 }
 
-impl<C, F> LambdaFetcher<C, F>
+impl<C, F> Fetcher<C, F>
     where C: Cache,
           F: Fn(&C::K) -> C::V
 {
     fn with_cache(cache: C, fetch: F) -> Self {
-        LambdaFetcher {
-            cache: cache,
+        Fetcher {
+            cache: Mutex::new(cache),
             fetch: fetch,
         }
     }
 }
 
-impl<C, F> Fetcher for LambdaFetcher<C, F>
+impl<C, F> Fetcher<C, F>
     where C: Cache,
           F: Fn(&C::K) -> C::V
 {
-    type K = C::K;
-    type V = C::V;
-    fn fetch<Q>(&mut self, key: Q) -> FetchedValue<Self::V>
-        where Q: Borrow<Self::K> + Ownable<Self::K>
+    fn fetch<Q>(&self, key: Q) -> FetchedValue<C>
+        where Q: Borrow<C::K> + Ownable<C::K>
     {
-        if self.cache.contains(key.borrow()) {
-            FetchedValue::Cached(self.cache.fetch(key.borrow()).unwrap())
+        let mut cache = MutexGuardRefMut::new(self.cache.lock().unwrap());
+        if cache.contains(key.borrow()) {
+            FetchedValue::Cached(cache.map(|cache| cache.fetch(key.borrow()).unwrap()))
         } else {
+            drop(cache);
             let value = (self.fetch)(key.borrow());
-            match self.cache.store(key.into_owned(), value) {
-                Ok(val) => FetchedValue::Cached(val),
-                Err(val) => FetchedValue::Uncached(val),
-            }
+            MutexGuardRefMut::new(self.cache.lock().unwrap())
+                .try_map(|cache| cache.store(key.into_owned(), value))
+                .map(FetchedValue::Cached)
+                .unwrap_or_else(FetchedValue::Uncached)
         }
     }
 }
@@ -115,7 +110,7 @@ impl<K, V, S> Cache for HashMap<K, V, S>
                 entry.insert(v);
                 Ok(entry.into_mut())
             }
-            Entry::Vacant(entry) => Ok(entry.insert(v))
+            Entry::Vacant(entry) => Ok(entry.insert(v)),
         }
     }
     fn fetch(&mut self, k: &Self::K) -> Option<&mut Self::V> {

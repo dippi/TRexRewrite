@@ -12,6 +12,8 @@ linear-map = "^1"
 fnv = "^1"
 lru-cache = "0.0.7"
 ordered-float = "^0.2"
+owning_ref = { git = "https://github.com/dippi/owning-ref-rs.git", rev = "refmut" }
+
 
 [dev-dependencies]
 rand = "^0.3"
