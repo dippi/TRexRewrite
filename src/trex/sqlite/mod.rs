@@ -6,6 +6,7 @@ use tesla::predicates::*;
 use trex::NodeProvider;
 use trex::rule_processor::*;
 use trex::expressions::evaluation::*;
+use trex::cache::{Cache, CachedFetcher, Fetcher};
 use self::query_builder::SqlContext;
 use linear_map::LinearMap;
 use lru_cache::LruCache;
@@ -27,25 +28,89 @@ pub enum CacheEntry {
     Exists(bool),
 }
 
-pub type Cache = LruCache<CacheKey, CacheEntry>;
+pub trait SqlCache: Cache<K = CacheKey, V = CacheEntry> + Send {}
+impl<T: Cache<K = CacheKey, V = CacheEntry> + Send> SqlCache for T {}
 
-pub struct SQLiteDriver {
-    idx: usize,
+struct SqlFetcher {
     predicate: Predicate,
+    statement: String,
     input_params: Vec<(usize, usize)>,
     output_params: Vec<BasicType>,
-    statement: String,
     pool: Pool<SqliteConnectionManager>,
-    cache: Arc<Mutex<Cache>>,
 }
 
-impl SQLiteDriver {
+impl SqlFetcher {
+    fn prepare_key(&self, result: &PartialResult) -> CacheKey {
+        let context = CompleteContext::new(result, ());
+        let input_params = self.input_params
+            .iter()
+            .map(|&(pred, par)| context.get_parameter(pred, par).clone())
+            .collect::<Vec<_>>();
+        CacheKey {
+            statement: self.statement.clone(),
+            input_params: input_params,
+        }
+    }
+}
+
+impl Fetcher<CacheKey, CacheEntry> for SqlFetcher {
+    fn fetch(&self, key: &CacheKey) -> CacheEntry {
+        // TODO handle errors with Result<_, _>
+        let conn = self.pool.get().unwrap();
+        let mut stmt = conn.prepare_cached(&self.statement).unwrap();
+        let owned_params = self.input_params
+            .iter()
+            .map(|&(pred, par)| format!(":param{}x{}", pred, par))
+            .zip(key.input_params.iter().map(to_sql_value))
+            .collect::<Vec<_>>();
+        let ref_params = owned_params.iter()
+            .map(|&(ref name, ref value)| (name as &str, to_sql_ref(value)))
+            .collect::<Vec<_>>();
+        match self.predicate.ty {
+            PredicateType::OrderdStatic { .. } |
+            PredicateType::UnorderedStatic { .. } => {
+                let cached = stmt.query_map_named(&ref_params, |row| {
+                        self.output_params
+                            .iter()
+                            .enumerate()
+                            .map(|(i, ty)| get_res(row, i as i32, ty))
+                            .collect()
+                    })
+                    .unwrap()
+                    .map(Result::unwrap)
+                    .collect();
+                CacheEntry::Values(cached)
+            }
+            PredicateType::StaticAggregate { .. } => {
+                let values =
+                    stmt.query_map_named(&ref_params,
+                                         |row| get_res(row, 1, &self.output_params[0]))
+                        .unwrap()
+                        .map(Result::unwrap)
+                        .collect();
+                CacheEntry::Values(vec![values])
+            }
+            PredicateType::StaticNegation { .. } => {
+                let exists = stmt.query_named(&ref_params).unwrap().next().is_some();
+                CacheEntry::Exists(exists)
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+pub struct SQLiteDriver<C: SqlCache> {
+    idx: usize,
+    fetcher: CachedFetcher<C, SqlFetcher>,
+}
+
+impl<C: SqlCache> SQLiteDriver<C> {
     pub fn new(idx: usize,
                tuple: &TupleDeclaration,
                predicate: &Predicate,
                parameters_ty: &LinearMap<(usize, usize), BasicType>,
                pool: Pool<SqliteConnectionManager>,
-               cache: Arc<Mutex<Cache>>)
+               cache: Arc<Mutex<C>>)
                -> Option<Self> {
         if let TupleType::Static = tuple.ty {
             let mut input_params = predicate.tuple
@@ -65,14 +130,18 @@ impl SQLiteDriver {
                 _ => Vec::new(),
             };
             let statement = SqlContext::new(idx, tuple).encode_predicate(predicate);
-            Some(SQLiteDriver {
-                idx: idx,
+
+            let fetcher = SqlFetcher {
                 predicate: predicate.clone(),
+                statement: statement,
                 input_params: input_params,
                 output_params: output_params,
-                statement: statement,
                 pool: pool,
-                cache: cache,
+            };
+
+            Some(SQLiteDriver {
+                idx: idx,
+                fetcher: CachedFetcher::with_cache(cache, fetcher),
             })
         } else {
             None
@@ -109,98 +178,30 @@ fn get_res(row: &Row, i: i32, ty: &BasicType) -> Value {
     }
 }
 
-impl EventProcessor for SQLiteDriver {
+impl<C: SqlCache> EventProcessor for SQLiteDriver<C> {
     fn evaluate(&self, result: &PartialResult) -> Vec<PartialResult> {
-        let context = CompleteContext::new(&result, ());
-        let input_params = self.input_params
-            .iter()
-            .map(|&(pred, par)| context.get_parameter(pred, par).clone())
-            .collect::<Vec<_>>();
-        let key = CacheKey {
-            statement: self.statement.clone(),
-            input_params: input_params,
-        };
-        let cached = {
-            let mut cache = self.cache.lock().unwrap();
-            cache.get_mut(&key).map(|cache_entry| {
-                match *cache_entry {
-                    CacheEntry::Values(ref cached) => {
-                        cached.iter()
-                            .map(|values| {
-                                values.iter()
-                                    .enumerate()
-                                    .fold(result.clone(), |result, (i, value)| {
-                                        result.insert_parameter((self.idx, i), value.clone())
-                                    })
+        // TODO Think a better way to prepare the key that doesn't require fetcher to be public
+        let key = self.fetcher.fetcher.prepare_key(result);
+        match *self.fetcher.fetch(key) {
+            CacheEntry::Values(ref cached) => {
+                cached.iter()
+                    .map(|values| {
+                        values.iter()
+                            .enumerate()
+                            .fold(result.clone(), |result, (i, value)| {
+                                result.insert_parameter((self.idx, i), value.clone())
                             })
-                            .collect()
-                    }
-                    CacheEntry::Exists(exists) => {
-                        if !exists { vec![result.clone()] } else { Vec::new() }
-                    }
-                }
-            })
-        };
-        cached.unwrap_or_else(|| {
-            // TODO handle errors with Result<_, _>
-            let conn = self.pool.get().unwrap();
-            let mut stmt = conn.prepare_cached(&self.statement).unwrap();
-            let owned_params = self.input_params
-                .iter()
-                .map(|&(pred, par)| {
-                    let name = format!(":param{}x{}", pred, par);
-                    let value = to_sql_value(&context.get_parameter(pred, par));
-                    (name, value)
-                })
-                .collect::<Vec<_>>();
-            let ref_params = owned_params.iter()
-                .map(|&(ref name, ref value)| (name as &str, to_sql_ref(value)))
-                .collect::<Vec<_>>();
-            match self.predicate.ty {
-                PredicateType::OrderdStatic { .. } |
-                PredicateType::UnorderedStatic { .. } => {
-                    let (result, cached) = stmt.query_map_named(&ref_params, |row| {
-                            self.output_params
-                                .iter()
-                                .enumerate()
-                                .fold((result.clone(), Vec::new()),
-                                      |(result, mut values), (i, ty)| {
-                                          let value = get_res(row, i as i32, ty);
-                                          values.push(value.clone());
-                                          (result.insert_parameter((self.idx, i), value), values)
-                                      })
-                        })
-                        .unwrap()
-                        .map(Result::unwrap)
-                        .unzip();
-                    self.cache.lock().unwrap().insert(key, CacheEntry::Values(cached));
-                    result
-                }
-                PredicateType::StaticAggregate { .. } => {
-                    let (result, values) = stmt.query_map_named(&ref_params, |row| {
-                            let value = get_res(row, 1, &self.output_params[0]);
-                            (result.clone().insert_parameter((self.idx, 0), value.clone()), value)
-                        })
-                        .unwrap()
-                        .map(Result::unwrap)
-                        .unzip();
-                    self.cache.lock().unwrap().insert(key, CacheEntry::Values(vec![values]));
-                    result
-                }
-                PredicateType::StaticNegation { .. } => {
-                    let exists = stmt.query_named(&ref_params).unwrap().next().is_some();
-                    self.cache.lock().unwrap().insert(key, CacheEntry::Exists(exists));
-                    if !exists { vec![result.clone()] } else { Vec::new() }
-                }
-                _ => unreachable!(),
+                    })
+                    .collect()
             }
-        })
+            CacheEntry::Exists(exists) => if !exists { vec![result.clone()] } else { Vec::new() },
+        }
     }
 }
 
 pub struct SqliteProvider {
     pool: Pool<SqliteConnectionManager>,
-    cache: Arc<Mutex<Cache>>,
+    cache: Arc<Mutex<LruCache<CacheKey, CacheEntry>>>,
 }
 
 impl SqliteProvider {
@@ -209,7 +210,7 @@ impl SqliteProvider {
         let manager = SqliteConnectionManager::new("./database.db");
         SqliteProvider {
             pool: Pool::new(config, manager).unwrap(),
-            cache: Arc::new(Mutex::new(Cache::new(100))),
+            cache: Arc::new(Mutex::new(LruCache::new(100))),
         }
     }
 }

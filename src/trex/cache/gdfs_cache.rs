@@ -100,18 +100,17 @@ impl<K, V, S> GDSFCache<K, V, S>
                 })
                 .position(|it| it >= excess);
             if let Some(num) = pos {
-                for i in 0..(num + 1) {
+                for _ in 0..(num + 1) {
                     let &(pri, entry_ptr) = self.queue.iter().next().unwrap();
                     // TODO get max priority from previous scan?
                     self.clock = pri;
                     unsafe {
-                        self.remove(&*key);
+                        self.remove(&*(*entry_ptr).key);
                     };
                 }
             } else {
                 self.clock = priority;
             }
-
         };
 
         if self.used + size <= self.capacity {

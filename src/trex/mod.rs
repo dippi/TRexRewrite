@@ -63,7 +63,7 @@ impl GeneralProvider {
                 let tuple = &tuples[&predicate.tuple.ty_id];
                 let processor = self.providers
                     .iter()
-                    .filter_map(|provider| provider.provide(i, tuple, &predicate, parameters_ty))
+                    .filter_map(|provider| provider.provide(i, tuple, predicate, parameters_ty))
                     .next()
                     .expect("No suitable processor");
                 (i, processor)

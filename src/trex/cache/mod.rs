@@ -7,7 +7,8 @@ use std::borrow::Borrow;
 use std::marker::PhantomData;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::collections::hash_map::{Entry, HashMap};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
+use std::ops::Deref;
 use lru_cache::LruCache;
 use owning_ref::MutexGuardRefMut;
 
@@ -20,48 +21,63 @@ pub trait Cache {
     fn remove(&mut self, k: &Self::K) -> Option<Self::V>;
 }
 
-enum FetchedValue<'a, C: Cache + 'a> {
+pub trait Fetcher<K, V> {
+    fn fetch(&self, &K) -> V;
+}
+
+pub enum FetchedValue<'a, C: Cache + 'a> {
     Cached(MutexGuardRefMut<'a, C, C::V>),
     Uncached(C::V),
 }
 
-pub struct Fetcher<C, F>
-    where C: Cache,
-          F: Fn(&C::K) -> C::V
-{
-    cache: Mutex<C>,
-    fetch: F,
+impl<'a, C: Cache + 'a> Deref for FetchedValue<'a, C> {
+    type Target = C::V;
+    fn deref(&self) -> &Self::Target {
+        match *self {
+            FetchedValue::Cached(ref val) => val,
+            FetchedValue::Uncached(ref val) => val,
+        }
+    }
 }
 
-impl<C, F> Fetcher<C, F>
+pub struct CachedFetcher<C, F>
+    where C: Cache,
+          F: Fetcher<C::K, C::V>
+{
+    // TODO make member variables private
+    pub cache: Arc<Mutex<C>>,
+    pub fetcher: F,
+}
+
+impl<C, F> CachedFetcher<C, F>
     where C: Cache + Default,
-          F: Fn(&C::K) -> C::V
+          F: Fetcher<C::K, C::V>
 {
-    fn new(fetch: F) -> Self {
-        Fetcher {
-            cache: Mutex::default(),
-            fetch: fetch,
+    pub fn new(fetcher: F) -> Self {
+        CachedFetcher {
+            cache: Arc::default(),
+            fetcher: fetcher,
         }
     }
 }
 
-impl<C, F> Fetcher<C, F>
+impl<C, F> CachedFetcher<C, F>
     where C: Cache,
-          F: Fn(&C::K) -> C::V
+          F: Fetcher<C::K, C::V>
 {
-    fn with_cache(cache: C, fetch: F) -> Self {
-        Fetcher {
-            cache: Mutex::new(cache),
-            fetch: fetch,
+    pub fn with_cache(cache: Arc<Mutex<C>>, fetcher: F) -> Self {
+        CachedFetcher {
+            cache: cache,
+            fetcher: fetcher,
         }
     }
 }
 
-impl<C, F> Fetcher<C, F>
+impl<C, F> CachedFetcher<C, F>
     where C: Cache,
-          F: Fn(&C::K) -> C::V
+          F: Fetcher<C::K, C::V>
 {
-    fn fetch<Q>(&self, key: Q) -> FetchedValue<C>
+    pub fn fetch<Q>(&self, key: Q) -> FetchedValue<C>
         where Q: Borrow<C::K> + Ownable<C::K>
     {
         let mut cache = MutexGuardRefMut::new(self.cache.lock().unwrap());
@@ -69,7 +85,7 @@ impl<C, F> Fetcher<C, F>
             FetchedValue::Cached(cache.map(|cache| cache.fetch(key.borrow()).unwrap()))
         } else {
             drop(cache);
-            let value = (self.fetch)(key.borrow());
+            let value = self.fetcher.fetch(key.borrow());
             MutexGuardRefMut::new(self.cache.lock().unwrap())
                 .try_map(|cache| cache.store(key.into_owned(), value))
                 .map(FetchedValue::Cached)
