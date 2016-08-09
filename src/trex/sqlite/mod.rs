@@ -7,6 +7,7 @@ use trex::NodeProvider;
 use trex::rule_processor::*;
 use trex::expressions::evaluation::*;
 use trex::cache::{Cache, CachedFetcher, Fetcher};
+use trex::cache::gdfs_cache::{HasCost, HasSize};
 use self::query_builder::SqlContext;
 use linear_map::LinearMap;
 use lru_cache::LruCache;
@@ -14,6 +15,7 @@ use rusqlite::Row;
 use rusqlite::types::{ToSql, Value as SqlValue};
 use r2d2::{Config, Pool};
 use r2d2_sqlite::SqliteConnectionManager;
+use chrono::UTC;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Hash, PartialEq, Eq)]
@@ -23,9 +25,30 @@ pub struct CacheKey {
 }
 
 #[derive(Debug)]
-pub enum CacheEntry {
+pub enum CacheEntryValue {
     Values(Vec<Vec<Value>>),
     Exists(bool),
+}
+
+#[derive(Debug)]
+pub struct CacheEntry {
+    cost: usize,
+    value: CacheEntryValue,
+}
+
+impl HasCost for CacheEntry {
+    fn cost(&self) -> usize {
+        self.cost
+    }
+}
+
+impl HasSize for CacheEntry {
+    fn size(&self) -> usize {
+        match self.value {
+            CacheEntryValue::Values(ref val) => val.len() * val[0].len(),
+            CacheEntryValue::Exists(..) => 1,
+        }
+    }
 }
 
 pub trait SqlCache: Cache<K = CacheKey, V = CacheEntry> + Send {}
@@ -56,6 +79,7 @@ impl SqlFetcher {
 impl Fetcher<CacheKey, CacheEntry> for SqlFetcher {
     fn fetch(&self, key: &CacheKey) -> CacheEntry {
         // TODO handle errors with Result<_, _>
+        let start = UTC::now();
         let conn = self.pool.get().unwrap();
         let mut stmt = conn.prepare_cached(&self.statement).unwrap();
         let owned_params = self.input_params
@@ -66,7 +90,7 @@ impl Fetcher<CacheKey, CacheEntry> for SqlFetcher {
         let ref_params = owned_params.iter()
             .map(|&(ref name, ref value)| (name as &str, to_sql_ref(value)))
             .collect::<Vec<_>>();
-        match self.predicate.ty {
+        let value = match self.predicate.ty {
             PredicateType::OrderdStatic { .. } |
             PredicateType::UnorderedStatic { .. } => {
                 let cached = stmt.query_map_named(&ref_params, |row| {
@@ -79,7 +103,7 @@ impl Fetcher<CacheKey, CacheEntry> for SqlFetcher {
                     .unwrap()
                     .map(Result::unwrap)
                     .collect();
-                CacheEntry::Values(cached)
+                CacheEntryValue::Values(cached)
             }
             PredicateType::StaticAggregate { .. } => {
                 let values =
@@ -88,13 +112,20 @@ impl Fetcher<CacheKey, CacheEntry> for SqlFetcher {
                         .unwrap()
                         .map(Result::unwrap)
                         .collect();
-                CacheEntry::Values(vec![values])
+                CacheEntryValue::Values(vec![values])
             }
             PredicateType::StaticNegation { .. } => {
                 let exists = stmt.query_named(&ref_params).unwrap().next().is_some();
-                CacheEntry::Exists(exists)
+                CacheEntryValue::Exists(exists)
             }
             _ => unreachable!(),
+        };
+
+        let cost = (UTC::now() - start).num_nanoseconds().unwrap_or(0) as usize;
+
+        CacheEntry {
+            cost: cost,
+            value: value,
         }
     }
 }
@@ -182,8 +213,8 @@ impl<C: SqlCache> EventProcessor for SQLiteDriver<C> {
     fn evaluate(&self, result: &PartialResult) -> Vec<PartialResult> {
         // TODO Think a better way to prepare the key that doesn't require fetcher to be public
         let key = self.fetcher.fetcher.prepare_key(result);
-        match *self.fetcher.fetch(key) {
-            CacheEntry::Values(ref cached) => {
+        match (*self.fetcher.fetch(key)).value {
+            CacheEntryValue::Values(ref cached) => {
                 cached.iter()
                     .map(|values| {
                         values.iter()
@@ -194,7 +225,7 @@ impl<C: SqlCache> EventProcessor for SQLiteDriver<C> {
                     })
                     .collect()
             }
-            CacheEntry::Exists(exists) => if !exists { vec![result.clone()] } else { Vec::new() },
+            CacheEntryValue::Exists(exists) => if !exists { vec![result.clone()] } else { Vec::new() },
         }
     }
 }

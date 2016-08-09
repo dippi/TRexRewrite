@@ -1,5 +1,5 @@
-mod ownable;
-mod gdfs_cache;
+pub mod ownable;
+pub mod gdfs_cache;
 
 use self::ownable::Ownable;
 use self::gdfs_cache::{GDSFCache, HasCost, HasSize};
