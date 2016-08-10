@@ -89,8 +89,9 @@ impl<K, V, S> GDSFCache<K, V, S>
         let entry_ptr = entry.as_mut() as *mut _;
         let priority = entry.priority();
 
-        let excess = self.used + size - self.capacity;
-        if excess > 0 {
+        let free = self.capacity - self.used;
+        if size > free {
+            let excess = size - free;
             let pos = self.queue
                 .iter()
                 .take_while(|it| it.0 <= priority)
@@ -139,5 +140,137 @@ impl<K, V, S> GDSFCache<K, V, S>
             self.queue.remove(&(entry.priority(), entry_ptr));
             entry.value
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GDSFCache, HasCost, HasSize, StorageEntry};
+
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    struct TestStruct {
+        id: usize,
+        cost: usize,
+        size: usize,
+    }
+
+    impl HasCost for TestStruct {
+        fn cost(&self) -> usize {
+            self.cost
+        }
+    }
+
+    impl HasSize for TestStruct {
+        fn size(&self) -> usize {
+            self.size
+        }
+    }
+
+    #[test]
+    fn simple_priority() {
+        let key = Box::new(1);
+        let value = TestStruct {
+            id: 1,
+            cost: 1,
+            size: 1,
+        };
+        let mut entry = StorageEntry::new(key.as_ref(), value, 0);
+        // The priority is simply: cost * frequency / size + clock
+        assert_eq!(entry.priority(), 1);
+        // Updates the clock and increases the frequency
+        assert_eq!(entry.update(1), 3);
+        // The value returned by update is the new priority
+        assert_eq!(entry.priority(), 3);
+    }
+
+    #[test]
+    fn complex_priority() {
+        let key = Box::new(1);
+        let value = TestStruct {
+            id: 1,
+            cost: 13000,
+            size: 150,
+        };
+        let mut entry = StorageEntry::new(key.as_ref(), value, 0);
+        // priority calculation uses integer division (so floor rounding)
+        assert_eq!(entry.priority(), 86);
+        // update both clock and frequency
+        assert_eq!(entry.update(256), 429);
+        // same clock, update only frequency
+        assert_eq!(entry.update(256), 516);
+    }
+
+    #[test]
+    fn successful_insertion() {
+        let mut cache = GDSFCache::<usize, TestStruct>::new(100);
+        let mut value = TestStruct {
+            id: 1,
+            cost: 1,
+            size: 100,
+        };
+        {
+            let result = cache.insert(1, value.clone());
+            assert_eq!(result, Ok(&mut value));
+        }
+        {
+            let result = cache.get_mut(&1);
+            assert_eq!(result, Some(&mut value));
+        }
+    }
+
+    #[test]
+    fn unsuccessful_insertion() {
+        let mut cache = GDSFCache::<usize, TestStruct>::new(100);
+        let mut value = TestStruct {
+            id: 1,
+            cost: 1,
+            size: 101,
+        };
+        {
+            let result = cache.insert(1, value.clone());
+            assert_eq!(result, Err(value));
+        }
+        {
+            let result = cache.get_mut(&1);
+            assert_eq!(result, None);
+        }
+    }
+
+    #[test]
+    fn single_eviction() {
+        let mut cache = GDSFCache::<usize, TestStruct>::new(3);
+        for i in 1..4 {
+            cache.insert(i, TestStruct {
+                id: i,
+                cost: i,
+                size: 1,
+            });
+        }
+        assert!(cache.queue.iter().map(|&(pri, _)| pri).eq((1..4)));
+        cache.insert(4, TestStruct {
+            id: 4,
+            cost: 4,
+            size: 1,
+        });
+        assert!(cache.queue.iter().map(|&(pri, _)| pri).eq((2..5)));
+    }
+
+    #[test]
+    fn multiple_eviction() {
+        let mut cache = GDSFCache::<usize, TestStruct>::new(3);
+        for i in 1..4 {
+            cache.insert(i, TestStruct {
+                id: i,
+                cost: i,
+                size: 1,
+            });
+        }
+        assert!(cache.queue.iter().map(|&(pri, _)| pri).eq((1..4)));
+        cache.insert(4, TestStruct {
+            id: 4,
+            cost: 8,
+            size: 2,
+        });
+        assert!(cache.queue.iter().map(|&(pri, _)| pri).eq((3..5)));
     }
 }
