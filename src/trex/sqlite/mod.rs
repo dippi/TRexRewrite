@@ -17,6 +17,8 @@ use r2d2::{Config, Pool};
 use r2d2_sqlite::SqliteConnectionManager;
 use chrono::UTC;
 use std::sync::{Arc, Mutex};
+use std::iter;
+use std::usize;
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub struct CacheKey {
@@ -26,7 +28,9 @@ pub struct CacheKey {
 
 #[derive(Debug)]
 pub enum CacheEntryValue {
-    Values(Vec<Vec<Value>>),
+    Values(usize, Vec<Value>),
+    Aggr(Value),
+    Count(usize),
     Exists(bool),
 }
 
@@ -45,7 +49,9 @@ impl HasCost for CacheEntry {
 impl HasSize for CacheEntry {
     fn size(&self) -> usize {
         match self.value {
-            CacheEntryValue::Values(ref val) => val.len() * val[0].len(),
+            CacheEntryValue::Values(_, ref val) => val.len(),
+            CacheEntryValue::Aggr(..) => 1,
+            CacheEntryValue::Count(val) => val,
             CacheEntryValue::Exists(..) => 1,
         }
     }
@@ -93,26 +99,37 @@ impl Fetcher<CacheKey, CacheEntry> for SqlFetcher {
         let value = match self.predicate.ty {
             PredicateType::OrderdStatic { .. } |
             PredicateType::UnorderedStatic { .. } => {
-                let cached = stmt.query_map_named(&ref_params, |row| {
-                        self.output_params
-                            .iter()
-                            .enumerate()
-                            .map(|(i, ty)| get_res(row, i as i32, ty))
-                            .collect()
-                    })
-                    .unwrap()
-                    .map(Result::unwrap)
-                    .collect();
-                CacheEntryValue::Values(cached)
+                if self.output_params.len() > 0 {
+                    let cached = stmt.query_map_named(&ref_params, |row| {
+                            self.output_params
+                                .iter()
+                                .enumerate()
+                                .map(|(i, ty)| get_res(row, i as i32, ty))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap()
+                        .flat_map(Result::unwrap)
+                        .collect();
+                    CacheEntryValue::Values(self.output_params.len(), cached)
+                } else {
+                    let cached =
+                        stmt.query_map_named(&ref_params, |row| row.get::<_, i64>(0) as usize)
+                            .unwrap()
+                            .map(Result::unwrap)
+                            .next()
+                            .unwrap();
+                    CacheEntryValue::Count(cached)
+                }
             }
             PredicateType::StaticAggregate { .. } => {
-                let values =
+                let value =
                     stmt.query_map_named(&ref_params,
-                                         |row| get_res(row, 1, &self.output_params[0]))
+                                         |row| get_res(row, 0, &self.output_params[0]))
                         .unwrap()
                         .map(Result::unwrap)
-                        .collect();
-                CacheEntryValue::Values(vec![values])
+                        .next()
+                        .unwrap();
+                CacheEntryValue::Aggr(value)
             }
             PredicateType::StaticNegation { .. } => {
                 let exists = stmt.query_named(&ref_params).unwrap().next().is_some();
@@ -121,7 +138,8 @@ impl Fetcher<CacheKey, CacheEntry> for SqlFetcher {
             _ => unreachable!(),
         };
 
-        let cost = (UTC::now() - start).num_nanoseconds().unwrap_or(0) as usize;
+        let cost =
+            (UTC::now() - start).num_nanoseconds().map(|it| it as usize).unwrap_or(usize::MAX);
 
         CacheEntry {
             cost: cost,
@@ -214,8 +232,8 @@ impl<C: SqlCache> EventProcessor for SQLiteDriver<C> {
         // TODO Think a better way to prepare the key that doesn't require fetcher to be public
         let key = self.fetcher.fetcher.prepare_key(result);
         match (*self.fetcher.fetch(key)).value {
-            CacheEntryValue::Values(ref cached) => {
-                cached.iter()
+            CacheEntryValue::Values(chunk_size, ref cached) => {
+                cached.chunks(chunk_size)
                     .map(|values| {
                         values.iter()
                             .enumerate()
@@ -225,7 +243,13 @@ impl<C: SqlCache> EventProcessor for SQLiteDriver<C> {
                     })
                     .collect()
             }
-            CacheEntryValue::Exists(exists) => if !exists { vec![result.clone()] } else { Vec::new() },
+            CacheEntryValue::Count(count) => iter::repeat(result).cloned().take(count).collect(),
+            CacheEntryValue::Aggr(ref value) => {
+                vec![result.clone().insert_parameter((self.idx, 0), value.clone())]
+            }
+            CacheEntryValue::Exists(exists) => {
+                if !exists { vec![result.clone()] } else { Vec::new() }
+            }
         }
     }
 }

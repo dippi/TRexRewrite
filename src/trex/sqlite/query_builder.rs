@@ -186,7 +186,7 @@ impl<'a> SqlContext<'a> {
 
         // FIXME guard against an empty selection!
         format!("SELECT {} FROM {} WHERE {} {}",
-                if !selection.is_empty() { selection } else { "1".to_owned() },
+                if !selection.is_empty() { selection } else { "COUNT(1)".to_owned() },
                 self.tuple.name,
                 filters,
                 rest)
