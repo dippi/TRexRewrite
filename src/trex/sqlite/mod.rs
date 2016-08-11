@@ -6,8 +6,8 @@ use tesla::predicates::*;
 use trex::NodeProvider;
 use trex::rule_processor::*;
 use trex::expressions::evaluation::*;
-use trex::cache::{Cache, CachedFetcher, Fetcher};
-use trex::cache::gdfs_cache::{HasCost, HasSize};
+use trex::cache::{Cache, CachedFetcher, CollisionCache, DummyCache, Fetcher, ModBuildHasher};
+use trex::cache::gdfs_cache::{GDSFCache, HasCost, HasSize};
 use self::query_builder::SqlContext;
 use linear_map::LinearMap;
 use lru_cache::LruCache;
@@ -58,7 +58,7 @@ impl HasSize for CacheEntry {
 }
 
 pub trait SqlCache: Cache<K = CacheKey, V = CacheEntry> + Send {}
-impl<T: Cache<K = CacheKey, V = CacheEntry> + Send> SqlCache for T {}
+impl<T: Cache<K = CacheKey, V = CacheEntry> + Send + ?Sized> SqlCache for T {}
 
 struct SqlFetcher {
     predicate: Predicate,
@@ -148,12 +148,12 @@ impl Fetcher<CacheKey, CacheEntry> for SqlFetcher {
     }
 }
 
-pub struct SQLiteDriver<C: SqlCache> {
+pub struct SQLiteDriver<C: SqlCache + ?Sized> {
     idx: usize,
     fetcher: CachedFetcher<C, SqlFetcher>,
 }
 
-impl<C: SqlCache> SQLiteDriver<C> {
+impl<C: SqlCache + ?Sized> SQLiteDriver<C> {
     pub fn new(idx: usize,
                tuple: &TupleDeclaration,
                predicate: &Predicate,
@@ -227,7 +227,7 @@ fn get_res(row: &Row, i: i32, ty: &BasicType) -> Value {
     }
 }
 
-impl<C: SqlCache> EventProcessor for SQLiteDriver<C> {
+impl<C: SqlCache + ?Sized> EventProcessor for SQLiteDriver<C> {
     fn evaluate(&self, result: &PartialResult) -> Vec<PartialResult> {
         // TODO Think a better way to prepare the key that doesn't require fetcher to be public
         let key = self.fetcher.fetcher.prepare_key(result);
@@ -254,18 +254,67 @@ impl<C: SqlCache> EventProcessor for SQLiteDriver<C> {
     }
 }
 
+// TODO Possible configurations:
+// - Cache ownership: [per_predicate, per_rule, thread_local, shared]
+// - Cache type: [dummy, random, lru, gdfs]
+// - Cache size
+
+#[derive(Debug, Copy, Clone)]
+pub enum CacheOwnership {
+    Shared,
+    PerPredicate,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum CacheType {
+    Dummy,
+    Collision,
+    Lru,
+    Gdfs,
+}
+
+#[derive(Debug, Clone)]
+pub struct SqliteConfig {
+    pub db_file: String,
+    pub pool_size: u32,
+    pub cache_size: usize,
+    pub cache_ownership: CacheOwnership,
+    pub cache_type: CacheType,
+}
+
+fn make_cache(ty: CacheType,
+              capacity: usize)
+              -> Arc<Mutex<Cache<K = CacheKey, V = CacheEntry> + Send>> {
+    match ty {
+        CacheType::Dummy => Arc::new(Mutex::new(DummyCache::default())),
+        CacheType::Collision => {
+            let build_hasher: ModBuildHasher = ModBuildHasher::new(capacity as u64);
+            let cache = CollisionCache::with_capacity_and_hasher(capacity, build_hasher);
+            Arc::new(Mutex::new(cache))
+        }
+        CacheType::Lru => Arc::new(Mutex::new(LruCache::new(capacity))),
+        CacheType::Gdfs => Arc::new(Mutex::<GDSFCache<_, _>>::new(GDSFCache::new(capacity))),
+    }
+}
+
 pub struct SqliteProvider {
     pool: Pool<SqliteConnectionManager>,
-    cache: Arc<Mutex<LruCache<CacheKey, CacheEntry>>>,
+    cache: Result<Arc<Mutex<Cache<K = CacheKey, V = CacheEntry> + Send>>, (CacheType, usize)>,
 }
 
 impl SqliteProvider {
-    pub fn new() -> Self {
-        let config = Config::builder().pool_size(10).build();
-        let manager = SqliteConnectionManager::new("./database.db");
+    pub fn new(cfg: SqliteConfig) -> Self {
+        let config = Config::builder().pool_size(cfg.pool_size).build();
+        let manager = SqliteConnectionManager::new(&cfg.db_file);
+
+        let cache = match cfg.cache_ownership {
+            CacheOwnership::Shared => Ok(make_cache(cfg.cache_type, cfg.cache_size)),
+            CacheOwnership::PerPredicate => Err((cfg.cache_type, cfg.cache_size)),
+        };
+
         SqliteProvider {
             pool: Pool::new(config, manager).unwrap(),
-            cache: Arc::new(Mutex::new(LruCache::new(100))),
+            cache: cache,
         }
     }
 }
@@ -277,13 +326,12 @@ impl NodeProvider for SqliteProvider {
                predicate: &Predicate,
                parameters_ty: &LinearMap<(usize, usize), BasicType>)
                -> Option<Box<EventProcessor>> {
-        SQLiteDriver::new(idx,
-                          tuple,
-                          predicate,
-                          parameters_ty,
-                          self.pool.clone(),
-                          self.cache.clone())
-            .map(Box::new)
-            .map(|it| it as Box<EventProcessor>)
+        let cache = match self.cache {
+            Ok(ref cache) => cache.clone(),
+            Err((ty, capacity)) => make_cache(ty, capacity),
+        };
+        let pool = self.pool.clone();
+        SQLiteDriver::new(idx, tuple, predicate, parameters_ty, pool, cache)
+            .map(|it| Box::new(it) as Box<EventProcessor>)
     }
 }

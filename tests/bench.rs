@@ -14,6 +14,7 @@ use trex::tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Listener, 
 use trex::tesla::expressions::*;
 use trex::tesla::predicates::*;
 use trex::trex::*;
+use trex::trex::stack::StackProvider;
 
 struct Config {
     num_rules: usize,
@@ -168,7 +169,8 @@ fn execute_bench_length(cfg: &Config) {
     let rules = generate_length_rules(&mut rng, &cfg);
     let evts = generate_length_events(&mut rng, &cfg);
 
-    let mut engine = TRex::new();
+    let providers: Vec<Box<NodeProvider>> = vec![Box::new(StackProvider)];
+    let mut engine = TRex::new(providers);
     for decl in decls {
         engine.declare(decl);
     }

@@ -55,6 +55,13 @@ pub struct GDSFCache<K, V, S = RandomState>
     clock: usize,
 }
 
+unsafe impl<K, V, S> Send for GDSFCache<K, V, S>
+    where K: Eq + Hash + Send,
+          V: HasSize + HasCost + Send,
+          S: BuildHasher + Send
+{
+}
+
 impl<K, V, S> GDSFCache<K, V, S>
     where K: Eq + Hash,
           V: HasSize + HasCost,
@@ -240,18 +247,20 @@ mod tests {
     fn single_eviction() {
         let mut cache = GDSFCache::<usize, TestStruct>::new(3);
         for i in 1..4 {
-            cache.insert(i, TestStruct {
-                id: i,
-                cost: i,
-                size: 1,
-            });
+            cache.insert(i,
+                         TestStruct {
+                             id: i,
+                             cost: i,
+                             size: 1,
+                         });
         }
         assert!(cache.queue.iter().map(|&(pri, _)| pri).eq((1..4)));
-        cache.insert(4, TestStruct {
-            id: 4,
-            cost: 4,
-            size: 1,
-        });
+        cache.insert(4,
+                     TestStruct {
+                         id: 4,
+                         cost: 4,
+                         size: 1,
+                     });
         assert!(cache.queue.iter().map(|&(pri, _)| pri).eq((2..5)));
     }
 
@@ -259,18 +268,20 @@ mod tests {
     fn multiple_eviction() {
         let mut cache = GDSFCache::<usize, TestStruct>::new(3);
         for i in 1..4 {
-            cache.insert(i, TestStruct {
-                id: i,
-                cost: i,
-                size: 1,
-            });
+            cache.insert(i,
+                         TestStruct {
+                             id: i,
+                             cost: i,
+                             size: 1,
+                         });
         }
         assert!(cache.queue.iter().map(|&(pri, _)| pri).eq((1..4)));
-        cache.insert(4, TestStruct {
-            id: 4,
-            cost: 8,
-            size: 2,
-        });
+        cache.insert(4,
+                     TestStruct {
+                         id: 4,
+                         cost: 8,
+                         size: 2,
+                     });
         assert!(cache.queue.iter().map(|&(pri, _)| pri).eq((3..5)));
     }
 }

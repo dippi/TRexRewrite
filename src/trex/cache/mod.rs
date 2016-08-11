@@ -6,7 +6,7 @@ use self::gdfs_cache::{GDSFCache, HasCost, HasSize};
 use std::borrow::Borrow;
 use std::marker::PhantomData;
 use std::hash::{BuildHasher, Hash, Hasher};
-use std::collections::hash_map::{Entry, HashMap};
+use std::collections::hash_map::{Entry, HashMap, RandomState};
 use std::sync::{Arc, Mutex};
 use std::ops::Deref;
 use lru_cache::LruCache;
@@ -25,12 +25,12 @@ pub trait Fetcher<K, V> {
     fn fetch(&self, &K) -> V;
 }
 
-pub enum FetchedValue<'a, C: Cache + 'a> {
+pub enum FetchedValue<'a, C: Cache + ?Sized + 'a> {
     Cached(MutexGuardRefMut<'a, C, C::V>),
     Uncached(C::V),
 }
 
-impl<'a, C: Cache + 'a> Deref for FetchedValue<'a, C> {
+impl<'a, C: Cache + ?Sized + 'a> Deref for FetchedValue<'a, C> {
     type Target = C::V;
     fn deref(&self) -> &Self::Target {
         match *self {
@@ -40,7 +40,7 @@ impl<'a, C: Cache + 'a> Deref for FetchedValue<'a, C> {
     }
 }
 
-pub struct CachedFetcher<C, F>
+pub struct CachedFetcher<C: ?Sized, F>
     where C: Cache,
           F: Fetcher<C::K, C::V>
 {
@@ -61,7 +61,7 @@ impl<C, F> CachedFetcher<C, F>
     }
 }
 
-impl<C, F> CachedFetcher<C, F>
+impl<C: ?Sized, F> CachedFetcher<C, F>
     where C: Cache,
           F: Fetcher<C::K, C::V>
 {
@@ -73,7 +73,7 @@ impl<C, F> CachedFetcher<C, F>
     }
 }
 
-impl<C, F> CachedFetcher<C, F>
+impl<C: ?Sized, F> CachedFetcher<C, F>
     where C: Cache,
           F: Fetcher<C::K, C::V>
 {
@@ -94,23 +94,29 @@ impl<C, F> CachedFetcher<C, F>
     }
 }
 
-#[derive(Default, Clone, Debug)]
-struct DummyCache<K, V>(PhantomData<K>, PhantomData<V>);
+#[derive(Clone, Debug)]
+pub struct DummyCache<K, V>(PhantomData<K>, PhantomData<V>);
 
 impl<K, V> Cache for DummyCache<K, V> {
     type K = K;
     type V = V;
-    fn store(&mut self, k: Self::K, v: Self::V) -> Result<&mut Self::V, Self::V> {
+    fn store(&mut self, _: Self::K, v: Self::V) -> Result<&mut Self::V, Self::V> {
         Err(v)
     }
-    fn fetch(&mut self, k: &Self::K) -> Option<&mut Self::V> {
+    fn fetch(&mut self, _: &Self::K) -> Option<&mut Self::V> {
         None
     }
-    fn contains(&mut self, k: &Self::K) -> bool {
+    fn contains(&mut self, _: &Self::K) -> bool {
         false
     }
-    fn remove(&mut self, k: &Self::K) -> Option<Self::V> {
+    fn remove(&mut self, _: &Self::K) -> Option<Self::V> {
         None
+    }
+}
+
+impl<K, V> Default for DummyCache<K, V> {
+    fn default() -> Self {
+        DummyCache(Default::default(), Default::default())
     }
 }
 
@@ -161,7 +167,7 @@ impl<K, V, S> Cache for LruCache<K, V, S>
     }
 }
 
-struct ModHasher<H: Hasher> {
+pub struct ModHasher<H: Hasher> {
     hasher: H,
     modulus: u64,
 }
@@ -206,13 +212,13 @@ impl<H: Hasher> Hasher for ModHasher<H> {
     }
 }
 
-struct ModBuildHasher<S: BuildHasher> {
+pub struct ModBuildHasher<S: BuildHasher = RandomState> {
     hash_builder: S,
     modulus: u64,
 }
 
 impl<S: BuildHasher + Default> ModBuildHasher<S> {
-    fn new(modulus: u64) -> Self {
+    pub fn new(modulus: u64) -> Self {
         ModBuildHasher {
             hash_builder: S::default(),
             modulus: modulus,
@@ -221,7 +227,7 @@ impl<S: BuildHasher + Default> ModBuildHasher<S> {
 }
 
 impl<S: BuildHasher> ModBuildHasher<S> {
-    fn with_modulus_and_hasher(modulus: u64, hash_builder: S) -> Self {
+    pub fn with_modulus_and_hasher(modulus: u64, hash_builder: S) -> Self {
         ModBuildHasher {
             hash_builder: hash_builder,
             modulus: modulus,
@@ -239,7 +245,7 @@ impl<S: BuildHasher> BuildHasher for ModBuildHasher<S> {
     }
 }
 
-type CollisionCache<K, V, S> = HashMap<K, V, ModBuildHasher<S>>;
+pub type CollisionCache<K, V, S = RandomState> = HashMap<K, V, ModBuildHasher<S>>;
 
 impl<K, V, S> Cache for GDSFCache<K, V, S>
     where K: Eq + Hash,

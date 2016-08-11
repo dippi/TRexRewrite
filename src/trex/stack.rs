@@ -179,6 +179,6 @@ impl NodeProvider for StackProvider {
                predicate: &Predicate,
                _: &LinearMap<(usize, usize), BasicType>)
                -> Option<Box<EventProcessor>> {
-        Stack::new(idx, tuple, predicate).map(Box::new).map(|it| it as Box<EventProcessor>)
+        Stack::new(idx, tuple, predicate).map(|it| Box::new(it) as Box<EventProcessor>)
     }
 }

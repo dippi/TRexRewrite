@@ -14,6 +14,8 @@ use trex::tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Listener, 
 use trex::tesla::expressions::*;
 use trex::tesla::predicates::*;
 use trex::trex::*;
+use trex::trex::stack::StackProvider;
+use trex::trex::sqlite::{CacheOwnership, CacheType, SqliteConfig, SqliteProvider};
 
 struct Config {
     num_rules: usize,
@@ -204,7 +206,17 @@ fn execute_bench_length(cfg: &Config) {
     let rules = generate_length_rules(&mut rng, &cfg);
     let evts = generate_length_events(&mut rng, &cfg);
 
-    let mut engine = TRex::new();
+    let sqlite_config = SqliteConfig {
+        db_file: "./database.db".to_owned(),
+        pool_size: 10,
+        cache_size: 100,
+        cache_ownership: CacheOwnership::Shared,
+        cache_type: CacheType::Lru,
+    };
+    let sqlite_provider = Box::new(SqliteProvider::new(sqlite_config));
+    let providers: Vec<Box<NodeProvider>> = vec![Box::new(StackProvider), sqlite_provider];
+
+    let mut engine = TRex::new(providers);
     for decl in decls {
         engine.declare(decl);
     }

@@ -1,8 +1,8 @@
 mod expressions;
-mod stack;
+pub mod stack;
 mod rule_processor;
 mod aggregators;
-mod sqlite;
+pub mod sqlite;
 mod rule_checks;
 mod cache;
 
@@ -25,7 +25,7 @@ use trex::sqlite::SqliteProvider;
 
 pub type FnvHashMap<K, V> = HashMap<K, V, BuildHasherDefault<FnvHasher>>;
 
-trait NodeProvider {
+pub trait NodeProvider {
     fn provide(&self,
                idx: usize,
                tuple: &TupleDeclaration,
@@ -40,13 +40,15 @@ struct GeneralProvider {
 
 impl GeneralProvider {
     fn new() -> Self {
-        // TODO generalise provider architecture to allow custom nodes and node providers
-        GeneralProvider {
-            providers: vec![
-                Box::new(StackProvider),
-                Box::new(SqliteProvider::new()),
-            ],
-        }
+        GeneralProvider { providers: Vec::new() }
+    }
+
+    fn with_providers(providers: Vec<Box<NodeProvider>>) -> Self {
+        GeneralProvider { providers: providers }
+    }
+
+    fn add_provider(&mut self, provider: Box<NodeProvider>) {
+        self.providers.push(provider);
     }
 
     fn provide(&self,
@@ -84,10 +86,10 @@ pub struct TRex {
 }
 
 impl TRex {
-    pub fn new() -> TRex {
+    pub fn new(providers: Vec<Box<NodeProvider>>) -> TRex {
         TRex {
             tuples: FnvHashMap::default(),
-            provider: GeneralProvider::new(),
+            provider: GeneralProvider::with_providers(providers),
             reverse_index: FnvHashMap::default(),
             listeners: BTreeMap::new(),
             last_id: 0,
