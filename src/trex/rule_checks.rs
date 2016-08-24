@@ -67,7 +67,7 @@ fn type_check_predicate<'a>(i: usize,
             match pred.ty {
                 PredicateType::Trigger { ref parameters, .. } |
                 PredicateType::Event { ref parameters, .. } |
-                PredicateType::OrderdStatic { ref parameters, .. } |
+                PredicateType::OrderedStatic { ref parameters, .. } |
                 PredicateType::UnorderedStatic { ref parameters, .. } => {
                     parameters.iter()
                         .enumerate()

@@ -97,7 +97,7 @@ impl Fetcher<CacheKey, CacheEntry> for SqlFetcher {
             .map(|&(ref name, ref value)| (name as &str, to_sql_ref(value)))
             .collect::<Vec<_>>();
         let value = match self.predicate.ty {
-            PredicateType::OrderdStatic { .. } |
+            PredicateType::OrderedStatic { .. } |
             PredicateType::UnorderedStatic { .. } => {
                 if self.output_params.len() > 0 {
                     let cached = stmt.query_map_named(&ref_params, |row| {
@@ -138,8 +138,10 @@ impl Fetcher<CacheKey, CacheEntry> for SqlFetcher {
             _ => unreachable!(),
         };
 
-        let cost =
-            (UTC::now() - start).num_nanoseconds().map(|it| it as usize).unwrap_or(usize::MAX);
+        let cost = (UTC::now() - start)
+            .num_nanoseconds()
+            .map(|it| it as usize)
+            .unwrap_or(usize::MAX);
 
         CacheEntry {
             cost: cost,
@@ -162,16 +164,10 @@ impl<C: SqlCache + ?Sized> SQLiteDriver<C> {
                cache: Arc<Mutex<C>>)
                -> Option<Self> {
         if let TupleType::Static = tuple.ty {
-            let mut input_params = predicate.tuple
-                .constraints
-                .iter()
-                .flat_map(|expr| expr.get_parameters())
-                .filter(|&(param, _)| param != idx)
-                .collect::<Vec<_>>();
-            input_params.sort();
-            input_params.dedup();
+            let mut input_params = predicate.get_used_parameters();
+            input_params.retain(|&(param, _)| param != idx);
             let output_params = match predicate.ty {
-                PredicateType::OrderdStatic { ref parameters, .. } |
+                PredicateType::OrderedStatic { ref parameters, .. } |
                 PredicateType::UnorderedStatic { ref parameters } => {
                     (0..parameters.len()).map(|n| parameters_ty[&(idx, n)].clone()).collect()
                 }

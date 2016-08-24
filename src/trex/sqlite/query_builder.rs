@@ -149,7 +149,7 @@ impl<'a> SqlContext<'a> {
         let mut rest = String::new();
 
         match pred.ty {
-            PredicateType::OrderdStatic { ref parameters, ref ordering } => {
+            PredicateType::OrderedStatic { ref parameters, ref ordering } => {
                 selection = parameters.iter()
                     .map(|par| {
                         let sql = self.insert_parameter(par);

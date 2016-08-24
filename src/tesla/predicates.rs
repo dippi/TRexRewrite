@@ -64,7 +64,7 @@ pub enum PredicateType {
         parameters: Vec<ParameterDeclaration>,
         timing: Timing,
     },
-    OrderdStatic {
+    OrderedStatic {
         // Selection mode always `FIRST`
         // (Last isn't sigificant since you can always specify the opposite ordering)
         parameters: Vec<ParameterDeclaration>,
@@ -100,4 +100,49 @@ pub struct ConstrainedTuple {
 pub struct Predicate {
     pub ty: PredicateType,
     pub tuple: ConstrainedTuple,
+}
+
+impl PredicateType {
+    fn get_used_parameters(&self) -> Vec<(usize, usize)> {
+        match *self {
+            PredicateType::Trigger { ref parameters } |
+            PredicateType::Event { ref parameters, .. } |
+            PredicateType::OrderedStatic { ref parameters, .. } |
+            PredicateType::UnorderedStatic { ref parameters } => {
+                let mut res = parameters.iter()
+                    .flat_map(|it| it.expression.get_parameters())
+                    .collect::<Vec<_>>();
+                res.sort();
+                res.dedup();
+                res
+            }
+            PredicateType::EventAggregate { ref parameter, .. } |
+            PredicateType::StaticAggregate { ref parameter, .. } => {
+                parameter.expression.get_parameters()
+            }
+            _ => Vec::new(),
+        }
+    }
+}
+
+impl ConstrainedTuple {
+    fn get_used_parameters(&self) -> Vec<(usize, usize)> {
+        let mut res = self.constraints
+            .iter()
+            .flat_map(|it| it.get_parameters())
+            .collect::<Vec<_>>();
+        res.sort();
+        res.dedup();
+        res
+    }
+}
+
+impl Predicate {
+    pub fn get_used_parameters(&self) -> Vec<(usize, usize)> {
+        let mut res = self.ty.get_used_parameters();
+        res.append(&mut self.tuple.get_used_parameters());
+        res.sort();
+        res.dedup();
+        res
+    }
 }
