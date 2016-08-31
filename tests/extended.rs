@@ -13,12 +13,15 @@
 //   - Repetitions
 // * Events queries
 //   - Window
+// * Static queries
+//   - Load time
 // * Queries (both event and static)
 //   - Num of input params
 //   - Num of output params
 //   - Selection policy
 //   - Num of results
 //   - Selectivity (#propagated / #processed OR #results / #rows)
+//   - Variations of num of results
 //   - Filters complexity
 //   - Aggregates complexity
 // * Cache
@@ -26,6 +29,7 @@
 //   - Type
 //   - Ownership
 //   - Ratio repeated vs new
+//   - Hit time vs miss time
 // * Other
 //   - Pre fetching
 //   - SQL Indexes
@@ -69,10 +73,11 @@ struct Config {
     db_name: String,
     table_columns: usize,
     table_rows: usize,
-    rows_matching: usize,
     cache_size: usize,
     cache_ownership: CacheOwnership,
     cache_type: CacheType,
+    matching_rows: usize,
+    matching_range: usize,
 }
 
 fn setup_db<R: Rng>(rng: &mut R, cfg: &Config) {
@@ -99,10 +104,9 @@ fn setup_db<R: Rng>(rng: &mut R, cfg: &Config) {
                                    placeholders);
         let mut stmt = tx.prepare(&insert_query).unwrap();
 
-        let groups = (cfg.table_rows / cfg.rows_matching + 1) as i64;
         for i in 0..cfg.table_rows {
             let data: Vec<_> = once(i as i64)
-                .chain(repeat(i as i64 % groups).take(cfg.table_columns))
+                .chain(repeat(rng.gen_range(0i64, cfg.table_rows as i64)).take(cfg.table_columns))
                 .collect();
             let reference: Vec<_> = data.iter().map(|it| it as &ToSql).collect();
             stmt.execute(&reference).unwrap();
@@ -122,7 +126,21 @@ fn generate_declarations<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<TupleDeclarat
                 name: format!("event{}", id),
                 attributes: Vec::new(),
             };
-            let mid_decls = (0..cfg.num_pred).map(move |j| {
+            let attrs = (0..3)
+                .map(|j| {
+                    AttributeDeclaration {
+                        name: format!("attr{}", j),
+                        ty: BasicType::Int,
+                    }
+                })
+                .collect();
+            let root_decl = TupleDeclaration {
+                ty: TupleType::Event,
+                id: id * 1000,
+                name: format!("event{}", id * 1000),
+                attributes: attrs,
+            };
+            let mid_decls = (1..(cfg.num_pred - 1)).map(move |j| {
                 let attr = AttributeDeclaration {
                     name: "attr".to_owned(),
                     ty: BasicType::Int,
@@ -144,11 +162,11 @@ fn generate_declarations<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<TupleDeclarat
                 .collect();
             let static_decl = TupleDeclaration {
                 ty: TupleType::Static,
-                id: id * 1000 + cfg.num_pred,
+                id: id * 1000 + cfg.num_pred - 1,
                 name: "test".to_owned(),
                 attributes: attributes,
             };
-            once(output_decl).chain(mid_decls).chain(once(static_decl))
+            once(output_decl).chain(once(root_decl)).chain(mid_decls).chain(once(static_decl))
         })
         .collect()
 }
@@ -162,8 +180,16 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
                 left: Box::new(Expression::Reference { attribute: 0 }),
                 right: Box::new(Expression::Immediate { value: 1.into() }),
             });
+            let root_parameter1 = ParameterDeclaration {
+                name: "x".to_owned(),
+                expression: Arc::new(Expression::Reference { attribute: 1 }),
+            };
+            let root_parameter2 = ParameterDeclaration {
+                name: "y".to_owned(),
+                expression: Arc::new(Expression::Reference { attribute: 2 }),
+            };
             let root_pred = Predicate {
-                ty: PredicateType::Trigger { parameters: Vec::new() },
+                ty: PredicateType::Trigger { parameters: vec![root_parameter1, root_parameter2] },
                 tuple: ConstrainedTuple {
                     ty_id: id * 1000,
                     constraints: vec![constraint.clone()],
@@ -198,16 +224,35 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
                     },
                 }
             });
-            let static_constr = Arc::new(Expression::BinaryOperation {
-                operator: BinaryOperator::Equal,
+            let static_constr1 = Arc::new(Expression::BinaryOperation {
+                operator: BinaryOperator::GreaterEqual,
                 left: Box::new(Expression::Reference { attribute: 0 }),
-                right: Box::new(Expression::Immediate { value: 11.into() }),
+                right: Box::new(Expression::Parameter {
+                    predicate: 0,
+                    parameter: 0,
+                }),
             });
+            let static_constr2 = Arc::new(Expression::BinaryOperation {
+                operator: BinaryOperator::LowerThan,
+                left: Box::new(Expression::Reference { attribute: 0 }),
+                right: Box::new(Expression::Parameter {
+                    predicate: 0,
+                    parameter: 1,
+                }),
+            });
+            let parameters = (0..cfg.table_columns)
+                .map(|i| {
+                    ParameterDeclaration {
+                        name: format!("z{}", i),
+                        expression: Arc::new(Expression::Reference { attribute: i }),
+                    }
+                })
+                .collect();
             let static_pred = Predicate {
-                ty: PredicateType::UnorderedStatic { parameters: Vec::new() },
+                ty: PredicateType::UnorderedStatic { parameters: parameters },
                 tuple: ConstrainedTuple {
-                    ty_id: id * 1000 + cfg.num_pred,
-                    constraints: vec![static_constr],
+                    ty_id: id * 1000 + cfg.num_pred - 1,
+                    constraints: vec![static_constr1, static_constr2],
                     alias: format!("alias{}", id * 1000 + cfg.num_pred),
                 },
             };
@@ -231,13 +276,27 @@ fn generate_events<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Event> {
     (0..cfg.num_events)
         .map(|_| {
             let def = rng.gen_range(0, cfg.num_def) + 1;
-            let state = rng.gen_range(0, cfg.num_pred);
-            Event {
-                tuple: Tuple {
-                    ty_id: def * 1000 + state,
-                    data: vec![Value::Int(1)],
-                },
-                time: UTC::now(),
+            let state = rng.gen_range(0, cfg.num_pred - 1);
+            if state == 0 {
+                let lower_bound = rng.gen_range(0, cfg.matching_range) as i32;
+                let upper_bound =
+                    lower_bound +
+                    ((cfg.matching_rows as f32) * rng.choose(&[0.5, 1.0, 1.5]).unwrap()) as i32;
+                Event {
+                    tuple: Tuple {
+                        ty_id: def * 1000,
+                        data: vec![Value::Int(1), lower_bound.into(), upper_bound.into()],
+                    },
+                    time: UTC::now(),
+                }
+            } else {
+                Event {
+                    tuple: Tuple {
+                        ty_id: def * 1000 + state,
+                        data: vec![Value::Int(1)],
+                    },
+                    time: UTC::now(),
+                }
             }
         })
         .collect()
@@ -267,11 +326,13 @@ fn execute_bench(cfg: &Config) {
     for rule in rules {
         engine.define(rule);
     }
+
+    use trex::trex::listeners::{CountListener, DebugListener};
     // engine.subscribe(Box::new(DebugListener));
-    // engine.subscribe(Box::new(CountListener {
-    //     count: 0,
-    //     duration: cfg.num_events / cfg.evts_per_sec,
-    // }));
+    engine.subscribe(Box::new(CountListener {
+        count: 0,
+        duration: cfg.num_events / cfg.evts_per_sec,
+    }));
 
     let start = UTC::now();
 
@@ -299,38 +360,36 @@ fn execute_bench(cfg: &Config) {
 
 #[test]
 fn extended_test() {
-    let mut cfg = Config {
-        num_rules: 1000,
-        num_def: 100,
-        num_pred: 3,
-        num_events: 300_000,
-        each_prob: 1.0,
-        first_prob: 0.0,
-        min_win: Duration::seconds(0),
-        max_win: Duration::seconds(1),
-        consuming: false,
-        queue_len: 100,
-        evts_per_sec: 10_000,
-        db_name: "./database.db".to_owned(),
-        table_columns: 2,
-        table_rows: 100_000,
-        rows_matching: 100,
-        cache_size: 1000,
-        cache_ownership: CacheOwnership::PerPredicate,
-        cache_type: CacheType::Gdfs,
-    };
-
-    let frequencies = (10_000...10_000).step_by(2000);
-    let windows = (2...2).step_by(4);
-
     println!("");
-    for freq in frequencies {
-        cfg.evts_per_sec = freq;
+    for freq in (5_000...5_000).step_by(2000) {
         println!("- Frequency: {:5} evt/sec", freq);
-        for avg_win in windows.clone() {
-            cfg.max_win = Duration::seconds(avg_win + 1 as i64);
-            cfg.min_win = Duration::seconds(avg_win - 1 as i64);
+        for avg_win in (2...2).step_by(4) {
+            let max_win = Duration::seconds(avg_win + 1 as i64);
+            let min_win = Duration::seconds(avg_win - 1 as i64);
             print!(" > Avg Window: {:2}s => ", avg_win);
+
+            let mut cfg = Config {
+                num_rules: 1000,
+                num_def: 100,
+                num_pred: 4,
+                num_events: 30_000,
+                each_prob: 1.0,
+                first_prob: 0.0,
+                min_win: min_win,
+                max_win: max_win,
+                consuming: false,
+                queue_len: 100,
+                evts_per_sec: freq,
+                db_name: "./database.db".to_owned(),
+                table_columns: 2,
+                table_rows: 100_000,
+                cache_size: 1000,
+                cache_ownership: CacheOwnership::PerPredicate,
+                cache_type: CacheType::Lru,
+                matching_rows: 10,
+                matching_range: 300,
+            };
+
             execute_bench(&cfg);
         }
     }
