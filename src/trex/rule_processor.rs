@@ -1,9 +1,10 @@
+
+use chrono::{DateTime, UTC};
+use linear_map::LinearMap;
+use std::sync::Arc;
 use tesla::{Event, Rule, Tuple};
 use tesla::expressions::Value;
 use tesla::predicates::*;
-use std::sync::Arc;
-use linear_map::LinearMap;
-use chrono::{DateTime, UTC};
 use trex::FnvHashMap;
 use trex::expressions::evaluation::*;
 
@@ -33,14 +34,10 @@ impl PartialResult {
         self
     }
 
-    pub fn get_parameter(&self, idx: (usize, usize)) -> &Value {
-        &self.parameters[&idx]
-    }
+    pub fn get_parameter(&self, idx: (usize, usize)) -> &Value { &self.parameters[&idx] }
 
     #[inline(always)]
-    pub fn get_time(&self, idx: usize) -> DateTime<UTC> {
-        self.events[&idx].time
-    }
+    pub fn get_time(&self, idx: usize) -> DateTime<UTC> { self.events[&idx].time }
 }
 
 pub trait EventProcessor: Send {
@@ -61,9 +58,7 @@ pub struct Trigger {
 }
 
 impl Trigger {
-    pub fn new(predicate: &Predicate) -> Self {
-        Trigger { predicate: predicate.clone() }
-    }
+    pub fn new(predicate: &Predicate) -> Self { Trigger { predicate: predicate.clone() } }
 
     fn is_satisfied(&self, context: &CompleteContext) -> bool {
         let check_expr = |expr: &Arc<_>| context.evaluate_expression(expr).unwrap_bool();

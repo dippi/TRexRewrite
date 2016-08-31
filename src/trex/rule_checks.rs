@@ -1,8 +1,9 @@
-use std::sync::Arc;
+
 use linear_map::LinearMap;
+use std::sync::Arc;
+use tesla::{EventTemplate, Rule, TupleDeclaration, TupleType};
 use tesla::expressions::*;
 use tesla::predicates::*;
-use tesla::{EventTemplate, Rule, TupleDeclaration, TupleType};
 use trex::FnvHashMap;
 use trex::expressions::inference::{CurrentType, InferenceContext};
 
@@ -10,9 +11,9 @@ use trex::expressions::inference::{CurrentType, InferenceContext};
 // or switch completely to a panic!() approach and defer checks to parser
 
 mod aggregate {
+    use tesla::TupleDeclaration;
     use tesla::expressions::BasicType;
     use tesla::predicates::Aggregator;
-    use tesla::TupleDeclaration;
 
     pub fn get_type(aggregator: &Aggregator,
                     tuple: &TupleDeclaration)

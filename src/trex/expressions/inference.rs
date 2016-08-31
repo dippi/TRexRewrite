@@ -1,7 +1,7 @@
 use linear_map::LinearMap;
-use tesla::expressions::*;
-use tesla::TupleDeclaration;
 use super::operations::{binary, unary};
+use tesla::TupleDeclaration;
+use tesla::expressions::*;
 
 // TODO improve error handling and more informative failure,
 // or switch completely to a panic!() approach and defer checks to parser
@@ -42,9 +42,7 @@ impl<'a> InferenceContext<'a> {
         self
     }
 
-    pub fn get_params(self) -> LinearMap<(usize, usize), BasicType> {
-        self.params
-    }
+    pub fn get_params(self) -> LinearMap<(usize, usize), BasicType> { self.params }
 }
 
 impl<'a> InferenceContext<'a> {

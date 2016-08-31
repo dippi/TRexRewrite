@@ -1,24 +1,24 @@
 mod query_builder;
 
+use chrono::UTC;
+use linear_map::LinearMap;
+use lru_cache::LruCache;
+use r2d2::{Config, Pool};
+use r2d2_sqlite::SqliteConnectionManager;
+use rusqlite::Row;
+use rusqlite::types::{ToSql, Value as SqlValue};
+use self::query_builder::SqlContext;
+use std::iter;
+use std::sync::{Arc, Mutex};
+use std::usize;
 use tesla::*;
 use tesla::expressions::*;
 use tesla::predicates::*;
 use trex::NodeProvider;
-use trex::rule_processor::*;
-use trex::expressions::evaluation::*;
 use trex::cache::{Cache, CachedFetcher, CollisionCache, DummyCache, Fetcher, ModBuildHasher};
 use trex::cache::gdfs_cache::{GDSFCache, HasCost, HasSize};
-use self::query_builder::SqlContext;
-use linear_map::LinearMap;
-use lru_cache::LruCache;
-use rusqlite::Row;
-use rusqlite::types::{ToSql, Value as SqlValue};
-use r2d2::{Config, Pool};
-use r2d2_sqlite::SqliteConnectionManager;
-use chrono::UTC;
-use std::sync::{Arc, Mutex};
-use std::iter;
-use std::usize;
+use trex::expressions::evaluation::*;
+use trex::rule_processor::*;
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub struct CacheKey {
@@ -41,9 +41,7 @@ pub struct CacheEntry {
 }
 
 impl HasCost for CacheEntry {
-    fn cost(&self) -> usize {
-        self.cost
-    }
+    fn cost(&self) -> usize { self.cost }
 }
 
 impl HasSize for CacheEntry {

@@ -1,8 +1,9 @@
-use std::vec::Vec;
+
+use chrono::Duration;
 use std::string::String;
 use std::sync::Arc;
+use std::vec::Vec;
 use tesla::expressions::Expression;
-use chrono::Duration;
 
 #[derive(Clone, Debug)]
 pub enum EventSelection {
@@ -28,12 +29,8 @@ pub struct ParameterDeclaration {
 
 #[derive(Clone, Debug)]
 pub enum TimingBound {
-    Within {
-        window: Duration,
-    },
-    Between {
-        lower: usize,
-    },
+    Within { window: Duration },
+    Between { lower: usize },
 }
 
 #[derive(Clone, Debug)]
@@ -56,9 +53,7 @@ pub struct Ordering {
 
 #[derive(Clone, Debug)]
 pub enum PredicateType {
-    Trigger {
-        parameters: Vec<ParameterDeclaration>,
-    },
+    Trigger { parameters: Vec<ParameterDeclaration>, },
     Event {
         selection: EventSelection,
         parameters: Vec<ParameterDeclaration>,
@@ -83,9 +78,7 @@ pub enum PredicateType {
         aggregator: Aggregator,
         parameter: ParameterDeclaration,
     },
-    EventNegation {
-        timing: Timing,
-    },
+    EventNegation { timing: Timing },
     StaticNegation,
 }
 

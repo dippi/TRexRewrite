@@ -4,18 +4,18 @@ extern crate rand;
 extern crate chrono;
 extern crate trex;
 
-use std::sync::Arc;
-use std::thread;
-use std::sync::mpsc::sync_channel;
-use rand::Rng;
 use chrono::{Duration, UTC};
+use rand::Rng;
+use std::sync::Arc;
+use std::sync::mpsc::sync_channel;
+use std::thread;
 use trex::tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Listener, Rule, Tuple,
                   TupleDeclaration, TupleType};
 use trex::tesla::expressions::*;
 use trex::tesla::predicates::*;
 use trex::trex::*;
-use trex::trex::stack::StackProvider;
 use trex::trex::sqlite::{CacheOwnership, CacheType, SqliteConfig, SqliteProvider};
+use trex::trex::stack::StackProvider;
 
 struct Config {
     num_rules: usize,
@@ -95,7 +95,8 @@ fn generate_length_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
             let rand = rng.gen_range(0.0, 1.0);
             let selection = if 0.0 <= rand && rand < cfg.each_prob {
                 EventSelection::Each
-            } else if cfg.each_prob <= rand && rand < cfg.each_prob + cfg.first_prob {
+            } else if cfg.each_prob <= rand &&
+                                      rand < cfg.each_prob + cfg.first_prob {
                 EventSelection::First
             } else {
                 EventSelection::Last
@@ -195,9 +196,7 @@ impl Drop for CountListener {
     }
 }
 impl Listener for CountListener {
-    fn receive(&mut self, event: &Arc<Event>) {
-        self.count += 1;
-    }
+    fn receive(&mut self, event: &Arc<Event>) { self.count += 1; }
 }
 
 fn execute_bench_length(cfg: &Config) {

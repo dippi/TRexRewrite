@@ -1,5 +1,6 @@
-use std::hash::{Hash, Hasher};
+
 use ordered_float::NotNaN;
+use std::hash::{Hash, Hasher};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BasicType {
@@ -43,13 +44,9 @@ pub enum BinaryOperator {
 
 #[derive(Clone, Debug)]
 pub enum Expression {
-    Immediate {
-        value: Value,
-    },
+    Immediate { value: Value },
     /// It always refers to the predicate it appears in
-    Reference {
-        attribute: usize,
-    },
+    Reference { attribute: usize },
     /// It refers to the value of the aggregation predicate it appears in
     Aggregate,
     Parameter {
@@ -89,27 +86,19 @@ impl Value {
 }
 
 impl From<i32> for Value {
-    fn from(val: i32) -> Self {
-        Value::Int(val)
-    }
+    fn from(val: i32) -> Self { Value::Int(val) }
 }
 
 impl From<f32> for Value {
-    fn from(val: f32) -> Self {
-        Value::Float(val)
-    }
+    fn from(val: f32) -> Self { Value::Float(val) }
 }
 
 impl From<bool> for Value {
-    fn from(val: bool) -> Self {
-        Value::Bool(val)
-    }
+    fn from(val: bool) -> Self { Value::Bool(val) }
 }
 
 impl From<String> for Value {
-    fn from(val: String) -> Self {
-        Value::Str(val)
-    }
+    fn from(val: String) -> Self { Value::Str(val) }
 }
 
 impl Value {

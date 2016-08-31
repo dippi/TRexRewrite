@@ -1,16 +1,16 @@
 pub mod ownable;
 pub mod gdfs_cache;
 
-use self::ownable::Ownable;
-use self::gdfs_cache::{GDSFCache, HasCost, HasSize};
-use std::borrow::Borrow;
-use std::marker::PhantomData;
-use std::hash::{BuildHasher, Hash, Hasher};
-use std::collections::hash_map::{Entry, HashMap, RandomState};
-use std::sync::{Arc, Mutex};
-use std::ops::Deref;
 use lru_cache::LruCache;
 use owning_ref::MutexGuardRefMut;
+use self::gdfs_cache::{GDSFCache, HasCost, HasSize};
+use self::ownable::Ownable;
+use std::borrow::Borrow;
+use std::collections::hash_map::{Entry, HashMap, RandomState};
+use std::hash::{BuildHasher, Hash, Hasher};
+use std::marker::PhantomData;
+use std::ops::Deref;
+use std::sync::{Arc, Mutex};
 
 pub trait Cache {
     type K;
@@ -100,24 +100,14 @@ pub struct DummyCache<K, V>(PhantomData<K>, PhantomData<V>);
 impl<K, V> Cache for DummyCache<K, V> {
     type K = K;
     type V = V;
-    fn store(&mut self, _: Self::K, v: Self::V) -> Result<&mut Self::V, Self::V> {
-        Err(v)
-    }
-    fn fetch(&mut self, _: &Self::K) -> Option<&mut Self::V> {
-        None
-    }
-    fn contains(&mut self, _: &Self::K) -> bool {
-        false
-    }
-    fn remove(&mut self, _: &Self::K) -> Option<Self::V> {
-        None
-    }
+    fn store(&mut self, _: Self::K, v: Self::V) -> Result<&mut Self::V, Self::V> { Err(v) }
+    fn fetch(&mut self, _: &Self::K) -> Option<&mut Self::V> { None }
+    fn contains(&mut self, _: &Self::K) -> bool { false }
+    fn remove(&mut self, _: &Self::K) -> Option<Self::V> { None }
 }
 
 impl<K, V> Default for DummyCache<K, V> {
-    fn default() -> Self {
-        DummyCache(Default::default(), Default::default())
-    }
+    fn default() -> Self { DummyCache(Default::default(), Default::default()) }
 }
 
 impl<K, V, S> Cache for HashMap<K, V, S>
@@ -135,15 +125,9 @@ impl<K, V, S> Cache for HashMap<K, V, S>
             Entry::Vacant(entry) => Ok(entry.insert(v)),
         }
     }
-    fn fetch(&mut self, k: &Self::K) -> Option<&mut Self::V> {
-        self.get_mut(k)
-    }
-    fn contains(&mut self, k: &Self::K) -> bool {
-        self.contains_key(k)
-    }
-    fn remove(&mut self, k: &Self::K) -> Option<Self::V> {
-        HashMap::remove(self, k)
-    }
+    fn fetch(&mut self, k: &Self::K) -> Option<&mut Self::V> { self.get_mut(k) }
+    fn contains(&mut self, k: &Self::K) -> bool { self.contains_key(k) }
+    fn remove(&mut self, k: &Self::K) -> Option<Self::V> { HashMap::remove(self, k) }
 }
 
 impl<K, V, S> Cache for LruCache<K, V, S>
@@ -156,15 +140,9 @@ impl<K, V, S> Cache for LruCache<K, V, S>
         self.insert(k, v);
         Ok(self.iter_mut().next_back().unwrap().1)
     }
-    fn fetch(&mut self, k: &Self::K) -> Option<&mut Self::V> {
-        self.get_mut(k)
-    }
-    fn contains(&mut self, k: &Self::K) -> bool {
-        self.contains_key(k)
-    }
-    fn remove(&mut self, k: &Self::K) -> Option<Self::V> {
-        LruCache::remove(self, k)
-    }
+    fn fetch(&mut self, k: &Self::K) -> Option<&mut Self::V> { self.get_mut(k) }
+    fn contains(&mut self, k: &Self::K) -> bool { self.contains_key(k) }
+    fn remove(&mut self, k: &Self::K) -> Option<Self::V> { LruCache::remove(self, k) }
 }
 
 pub struct ModHasher<H: Hasher> {
@@ -173,43 +151,19 @@ pub struct ModHasher<H: Hasher> {
 }
 
 impl<H: Hasher> Hasher for ModHasher<H> {
-    fn finish(&self) -> u64 {
-        self.hasher.finish() % self.modulus
-    }
-    fn write(&mut self, bytes: &[u8]) {
-        self.hasher.write(bytes)
-    }
+    fn finish(&self) -> u64 { self.hasher.finish() % self.modulus }
+    fn write(&mut self, bytes: &[u8]) { self.hasher.write(bytes) }
 
-    fn write_u8(&mut self, i: u8) {
-        self.hasher.write_u8(i)
-    }
-    fn write_u16(&mut self, i: u16) {
-        self.hasher.write_u16(i)
-    }
-    fn write_u32(&mut self, i: u32) {
-        self.hasher.write_u32(i)
-    }
-    fn write_u64(&mut self, i: u64) {
-        self.hasher.write_u64(i)
-    }
-    fn write_usize(&mut self, i: usize) {
-        self.hasher.write_usize(i)
-    }
-    fn write_i8(&mut self, i: i8) {
-        self.hasher.write_i8(i)
-    }
-    fn write_i16(&mut self, i: i16) {
-        self.hasher.write_i16(i)
-    }
-    fn write_i32(&mut self, i: i32) {
-        self.hasher.write_i32(i)
-    }
-    fn write_i64(&mut self, i: i64) {
-        self.hasher.write_i64(i)
-    }
-    fn write_isize(&mut self, i: isize) {
-        self.hasher.write_isize(i)
-    }
+    fn write_u8(&mut self, i: u8) { self.hasher.write_u8(i) }
+    fn write_u16(&mut self, i: u16) { self.hasher.write_u16(i) }
+    fn write_u32(&mut self, i: u32) { self.hasher.write_u32(i) }
+    fn write_u64(&mut self, i: u64) { self.hasher.write_u64(i) }
+    fn write_usize(&mut self, i: usize) { self.hasher.write_usize(i) }
+    fn write_i8(&mut self, i: i8) { self.hasher.write_i8(i) }
+    fn write_i16(&mut self, i: i16) { self.hasher.write_i16(i) }
+    fn write_i32(&mut self, i: i32) { self.hasher.write_i32(i) }
+    fn write_i64(&mut self, i: i64) { self.hasher.write_i64(i) }
+    fn write_isize(&mut self, i: isize) { self.hasher.write_isize(i) }
 }
 
 pub struct ModBuildHasher<S: BuildHasher = RandomState> {
@@ -257,13 +211,7 @@ impl<K, V, S> Cache for GDSFCache<K, V, S>
     fn store(&mut self, k: Self::K, v: Self::V) -> Result<&mut Self::V, Self::V> {
         self.insert(k, v)
     }
-    fn fetch(&mut self, k: &Self::K) -> Option<&mut Self::V> {
-        self.get_mut(k)
-    }
-    fn contains(&mut self, k: &Self::K) -> bool {
-        self.contains_key(k)
-    }
-    fn remove(&mut self, k: &Self::K) -> Option<Self::V> {
-        GDSFCache::remove(self, k)
-    }
+    fn fetch(&mut self, k: &Self::K) -> Option<&mut Self::V> { self.get_mut(k) }
+    fn contains(&mut self, k: &Self::K) -> bool { self.contains_key(k) }
+    fn remove(&mut self, k: &Self::K) -> Option<Self::V> { GDSFCache::remove(self, k) }
 }

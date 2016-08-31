@@ -1,18 +1,17 @@
+
+use chrono::{DateTime, UTC};
+use linear_map::LinearMap;
+use std::cmp::Ordering as CmpOrd;
+use std::sync::Arc;
 use tesla::{Event, TupleDeclaration};
 use tesla::expressions::*;
 use tesla::predicates::*;
-use std::sync::Arc;
-use std::cmp::Ordering as CmpOrd;
-use chrono::{DateTime, UTC};
-use linear_map::LinearMap;
 use trex::{FnvHashMap, NodeProvider};
-use trex::rule_processor::{EventProcessor, PartialResult};
-use trex::expressions::evaluation::*;
 use trex::aggregators::compute_aggregate;
+use trex::expressions::evaluation::*;
+use trex::rule_processor::{EventProcessor, PartialResult};
 
-fn ptr_eq<T>(a: *const T, b: *const T) -> bool {
-    a == b
-}
+fn ptr_eq<T>(a: *const T, b: *const T) -> bool { a == b }
 
 #[derive(Clone, Debug)]
 pub struct Stack {

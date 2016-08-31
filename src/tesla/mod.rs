@@ -1,8 +1,8 @@
 pub mod expressions;
 pub mod predicates;
 
-use std::sync::Arc;
 use chrono::{DateTime, UTC};
+use std::sync::Arc;
 use tesla::expressions::{BasicType, Expression, Value};
 use tesla::predicates::Predicate;
 
@@ -65,9 +65,7 @@ impl<'a, T> ClonableIterator<'a> for T
 }
 
 impl<'a, T: 'a> Clone for Box<ClonableIterator<'a, Item = T> + 'a> {
-    fn clone(&self) -> Self {
-        (**self).clone_iter()
-    }
+    fn clone(&self) -> Self { (**self).clone_iter() }
 }
 
 pub type EventsIterator<'a> = Box<ClonableIterator<'a, Item = &'a Arc<Event>> + 'a>;

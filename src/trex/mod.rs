@@ -5,23 +5,22 @@ mod aggregators;
 pub mod sqlite;
 mod rule_checks;
 mod cache;
+pub mod listeners;
 
-use tesla::{Engine, Event, Listener, Rule, TupleDeclaration};
-use tesla::predicates::Predicate;
-use tesla::expressions::BasicType;
+use fnv::FnvHasher;
+use linear_map::LinearMap;
 use std::collections::{BTreeMap, HashMap};
 use std::collections::hash_map::Entry;
 use std::hash::BuildHasherDefault;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use tesla::{Engine, Event, Listener, Rule, TupleDeclaration};
+use tesla::expressions::BasicType;
+use tesla::predicates::Predicate;
 use threadpool::ThreadPool;
-use linear_map::LinearMap;
-use fnv::FnvHasher;
 use trex::rule_checks::check_rule;
 use trex::rule_processor::*;
-use trex::stack::StackProvider;
-use trex::sqlite::SqliteProvider;
 
 pub type FnvHashMap<K, V> = HashMap<K, V, BuildHasherDefault<FnvHasher>>;
 
@@ -39,17 +38,13 @@ struct GeneralProvider {
 }
 
 impl GeneralProvider {
-    fn new() -> Self {
-        GeneralProvider { providers: Vec::new() }
-    }
+    fn new() -> Self { GeneralProvider { providers: Vec::new() } }
 
     fn with_providers(providers: Vec<Box<NodeProvider>>) -> Self {
         GeneralProvider { providers: providers }
     }
 
-    fn add_provider(&mut self, provider: Box<NodeProvider>) {
-        self.providers.push(provider);
-    }
+    fn add_provider(&mut self, provider: Box<NodeProvider>) { self.providers.push(provider); }
 
     fn provide(&self,
                rule: Rule,

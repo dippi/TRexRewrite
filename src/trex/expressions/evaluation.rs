@@ -1,7 +1,8 @@
+
+use super::operations::{binary, unary};
 use tesla::*;
 use tesla::expressions::*;
 use trex::rule_processor::PartialResult;
-use super::operations::{binary, unary};
 
 fn cast(value: &Value, ty: &BasicType) -> Value {
     match (ty, value) {
@@ -46,15 +47,11 @@ pub struct SimpleContext<'a> {
 }
 
 impl<'a> SimpleContext<'a> {
-    pub fn new(tuple: &'a Tuple) -> Self {
-        SimpleContext { tuple: tuple }
-    }
+    pub fn new(tuple: &'a Tuple) -> Self { SimpleContext { tuple: tuple } }
 }
 
 impl<'a> EvaluationContext for SimpleContext<'a> {
-    fn get_attribute(&self, attribute: usize) -> Value {
-        self.tuple.data[attribute].clone()
-    }
+    fn get_attribute(&self, attribute: usize) -> Value { self.tuple.data[attribute].clone() }
 
     fn get_aggregate(&self) -> Value {
         panic!("SimpleContext cannot retrieve aggregates");
@@ -73,21 +70,15 @@ pub enum CurrentValue<'a> {
 }
 
 impl<'a> From<()> for CurrentValue<'a> {
-    fn from(_: ()) -> Self {
-        CurrentValue::Empty
-    }
+    fn from(_: ()) -> Self { CurrentValue::Empty }
 }
 
 impl<'a> From<&'a Value> for CurrentValue<'a> {
-    fn from(aggr: &'a Value) -> Self {
-        CurrentValue::Aggr(aggr)
-    }
+    fn from(aggr: &'a Value) -> Self { CurrentValue::Aggr(aggr) }
 }
 
 impl<'a> From<&'a Tuple> for CurrentValue<'a> {
-    fn from(tuple: &'a Tuple) -> Self {
-        CurrentValue::Tuple(tuple)
-    }
+    fn from(tuple: &'a Tuple) -> Self { CurrentValue::Tuple(tuple) }
 }
 
 #[derive(Clone, Debug)]

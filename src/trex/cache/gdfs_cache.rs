@@ -1,6 +1,7 @@
-use std::hash::{BuildHasher, Hash};
+
 use std::collections::{BTreeSet, HashMap};
 use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hash};
 
 // TODO clean everything up (maybe using hand crafted collections)
 
@@ -83,9 +84,7 @@ impl<K, V, S> GDSFCache<K, V, S>
           V: HasSize + HasCost,
           S: BuildHasher
 {
-    pub fn contains_key(&self, key: &K) -> bool {
-        self.storage.contains_key(key)
-    }
+    pub fn contains_key(&self, key: &K) -> bool { self.storage.contains_key(key) }
     pub fn insert(&mut self, key: K, value: V) -> Result<&mut V, V> {
         self.remove(&key);
 
@@ -162,15 +161,11 @@ mod tests {
     }
 
     impl HasCost for TestStruct {
-        fn cost(&self) -> usize {
-            self.cost
-        }
+        fn cost(&self) -> usize { self.cost }
     }
 
     impl HasSize for TestStruct {
-        fn size(&self) -> usize {
-            self.size
-        }
+        fn size(&self) -> usize { self.size }
     }
 
     #[test]
