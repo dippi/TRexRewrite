@@ -34,7 +34,7 @@ impl<K, V> StorageEntry<K, V>
         }
     }
     fn priority(&self) -> usize {
-        self.clock + self.frequency * self.value.cost() / self.value.size()
+        self.clock + self.frequency * self.value.cost() / (self.value.size() + 1)
     }
     fn update(&mut self, clock: usize) -> usize {
         self.clock = clock;
@@ -85,7 +85,7 @@ impl<K, V, S> GDSFCache<K, V, S>
           S: BuildHasher
 {
     pub fn contains_key(&self, key: &K) -> bool { self.storage.contains_key(key) }
-    pub fn insert(&mut self, key: K, value: V) -> Result<&mut V, V> {
+    pub fn insert(&mut self, key: K, value: V) -> Result<&V, V> {
         self.remove(&key);
 
         let size = value.size();
@@ -124,19 +124,19 @@ impl<K, V, S> GDSFCache<K, V, S>
             self.storage.insert(key, entry);
             self.queue.insert((priority, entry_ptr));
             self.used += size;
-            unsafe { Ok(&mut (*entry_ptr).value) }
+            unsafe { Ok(&(*entry_ptr).value) }
         } else {
             Err(entry.value)
         }
     }
-    pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
+    pub fn get(&mut self, key: &K) -> Option<&V> {
         let queue = &mut self.queue;
         let clock = self.clock;
         self.storage.get_mut(key).map(|entry| {
             let entry_ptr = entry.as_mut() as *mut _;
             queue.remove(&(entry.priority(), entry_ptr));
             queue.insert((entry.update(clock), entry_ptr));
-            &mut entry.value
+            &entry.value
         })
     }
     pub fn remove(&mut self, key: &K) -> Option<V> {
@@ -212,11 +212,11 @@ mod tests {
         };
         {
             let result = cache.insert(1, value.clone());
-            assert_eq!(result, Ok(&mut value));
+            assert_eq!(result, Ok(&value));
         }
         {
-            let result = cache.get_mut(&1);
-            assert_eq!(result, Some(&mut value));
+            let result = cache.get(&1);
+            assert_eq!(result, Some(&value));
         }
     }
 
@@ -233,7 +233,7 @@ mod tests {
             assert_eq!(result, Err(value));
         }
         {
-            let result = cache.get_mut(&1);
+            let result = cache.get(&1);
             assert_eq!(result, None);
         }
     }

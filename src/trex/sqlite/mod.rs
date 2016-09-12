@@ -3,6 +3,7 @@ mod query_builder;
 use chrono::UTC;
 use linear_map::LinearMap;
 use lru_cache::LruCache;
+use lru_size_cache::{HasSize as LruHasSize, LruSizeCache};
 use r2d2::{Config, Pool};
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Row;
@@ -49,10 +50,14 @@ impl HasSize for CacheEntry {
         match self.value {
             CacheEntryValue::Values(_, ref val) => val.len(),
             CacheEntryValue::Aggr(..) => 1,
-            CacheEntryValue::Count(val) => val,
+            CacheEntryValue::Count(..) => 1,
             CacheEntryValue::Exists(..) => 1,
         }
     }
+}
+
+impl LruHasSize for CacheEntry {
+    fn size(&self) -> usize { HasSize::size(self) }
 }
 
 pub trait SqlCache: Cache<K = CacheKey, V = CacheEntry> + Send {}
@@ -264,6 +269,7 @@ pub enum CacheType {
     Dummy,
     Collision,
     Lru,
+    LruSize,
     Gdfs,
 }
 
@@ -287,6 +293,7 @@ fn make_cache(ty: CacheType,
             Arc::new(Mutex::new(cache))
         }
         CacheType::Lru => Arc::new(Mutex::new(LruCache::new(capacity))),
+        CacheType::LruSize => Arc::new(Mutex::new(LruSizeCache::new(capacity))),
         CacheType::Gdfs => Arc::new(Mutex::<GDSFCache<_, _>>::new(GDSFCache::new(capacity))),
     }
 }

@@ -11,6 +11,7 @@ threadpool = "^1"
 linear-map = "^1"
 fnv = "^1"
 lru-cache = "0.0.7"
+lru-size-cache = { git = "https://github.com/dippi/lru-size-cache.git", rev = "master" }
 ordered-float = "^0.2"
 owning_ref = { git = "https://github.com/dippi/owning-ref-rs.git", rev = "refmut" }
 

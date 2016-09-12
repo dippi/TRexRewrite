@@ -2,7 +2,8 @@ pub mod ownable;
 pub mod gdfs_cache;
 
 use lru_cache::LruCache;
-use owning_ref::MutexGuardRefMut;
+use lru_size_cache::{HasSize as LruHasSize, LruSizeCache};
+use owning_ref::{MutexGuardRef, MutexGuardRefMut};
 use self::gdfs_cache::{GDSFCache, HasCost, HasSize};
 use self::ownable::Ownable;
 use std::borrow::Borrow;
@@ -15,8 +16,8 @@ use std::sync::{Arc, Mutex};
 pub trait Cache {
     type K;
     type V;
-    fn store(&mut self, k: Self::K, v: Self::V) -> Result<&mut Self::V, Self::V>;
-    fn fetch(&mut self, k: &Self::K) -> Option<&mut Self::V>;
+    fn store(&mut self, k: Self::K, v: Self::V) -> Result<&Self::V, Self::V>;
+    fn fetch(&mut self, k: &Self::K) -> Option<&Self::V>;
     fn contains(&mut self, k: &Self::K) -> bool;
     fn remove(&mut self, k: &Self::K) -> Option<Self::V>;
 }
@@ -26,7 +27,7 @@ pub trait Fetcher<K, V> {
 }
 
 pub enum FetchedValue<'a, C: Cache + ?Sized + 'a> {
-    Cached(MutexGuardRefMut<'a, C, C::V>),
+    Cached(MutexGuardRef<'a, C, C::V>),
     Uncached(C::V),
 }
 
@@ -82,7 +83,7 @@ impl<C: ?Sized, F> CachedFetcher<C, F>
     {
         let mut cache = MutexGuardRefMut::new(self.cache.lock().unwrap());
         if cache.contains(key.borrow()) {
-            FetchedValue::Cached(cache.map(|cache| cache.fetch(key.borrow()).unwrap()))
+            FetchedValue::Cached(cache.map(|cache| cache.fetch(key.borrow()).unwrap()).into())
         } else {
             drop(cache);
             let value = self.fetcher.fetch(key.borrow());
@@ -100,8 +101,8 @@ pub struct DummyCache<K, V>(PhantomData<K>, PhantomData<V>);
 impl<K, V> Cache for DummyCache<K, V> {
     type K = K;
     type V = V;
-    fn store(&mut self, _: Self::K, v: Self::V) -> Result<&mut Self::V, Self::V> { Err(v) }
-    fn fetch(&mut self, _: &Self::K) -> Option<&mut Self::V> { None }
+    fn store(&mut self, _: Self::K, v: Self::V) -> Result<&Self::V, Self::V> { Err(v) }
+    fn fetch(&mut self, _: &Self::K) -> Option<&Self::V> { None }
     fn contains(&mut self, _: &Self::K) -> bool { false }
     fn remove(&mut self, _: &Self::K) -> Option<Self::V> { None }
 }
@@ -116,7 +117,7 @@ impl<K, V, S> Cache for HashMap<K, V, S>
 {
     type K = K;
     type V = V;
-    fn store(&mut self, k: Self::K, v: Self::V) -> Result<&mut Self::V, Self::V> {
+    fn store(&mut self, k: Self::K, v: Self::V) -> Result<&Self::V, Self::V> {
         match self.entry(k) {
             Entry::Occupied(mut entry) => {
                 entry.insert(v);
@@ -125,7 +126,7 @@ impl<K, V, S> Cache for HashMap<K, V, S>
             Entry::Vacant(entry) => Ok(entry.insert(v)),
         }
     }
-    fn fetch(&mut self, k: &Self::K) -> Option<&mut Self::V> { self.get_mut(k) }
+    fn fetch(&mut self, k: &Self::K) -> Option<&Self::V> { self.get(k) }
     fn contains(&mut self, k: &Self::K) -> bool { self.contains_key(k) }
     fn remove(&mut self, k: &Self::K) -> Option<Self::V> { HashMap::remove(self, k) }
 }
@@ -136,13 +137,29 @@ impl<K, V, S> Cache for LruCache<K, V, S>
 {
     type K = K;
     type V = V;
-    fn store(&mut self, k: Self::K, v: Self::V) -> Result<&mut Self::V, Self::V> {
+    fn store(&mut self, k: Self::K, v: Self::V) -> Result<&Self::V, Self::V> {
         self.insert(k, v);
         Ok(self.iter_mut().next_back().unwrap().1)
     }
-    fn fetch(&mut self, k: &Self::K) -> Option<&mut Self::V> { self.get_mut(k) }
+    fn fetch(&mut self, k: &Self::K) -> Option<&Self::V> { self.get_mut(k).map(|it| it as &_) }
     fn contains(&mut self, k: &Self::K) -> bool { self.contains_key(k) }
     fn remove(&mut self, k: &Self::K) -> Option<Self::V> { LruCache::remove(self, k) }
+}
+
+impl<K, V, S> Cache for LruSizeCache<K, V, S>
+    where K: Eq + Hash,
+          S: BuildHasher,
+          V: LruHasSize
+{
+    type K = K;
+    type V = V;
+    fn store(&mut self, k: Self::K, v: Self::V) -> Result<&Self::V, Self::V> {
+        self.insert(k, v);
+        Ok(self.iter().next_back().unwrap().1)
+    }
+    fn fetch(&mut self, k: &Self::K) -> Option<&Self::V> { self.get(k) }
+    fn contains(&mut self, k: &Self::K) -> bool { self.contains_key(k) }
+    fn remove(&mut self, k: &Self::K) -> Option<Self::V> { LruSizeCache::remove(self, k) }
 }
 
 pub struct ModHasher<H: Hasher> {
@@ -208,10 +225,8 @@ impl<K, V, S> Cache for GDSFCache<K, V, S>
 {
     type K = K;
     type V = V;
-    fn store(&mut self, k: Self::K, v: Self::V) -> Result<&mut Self::V, Self::V> {
-        self.insert(k, v)
-    }
-    fn fetch(&mut self, k: &Self::K) -> Option<&mut Self::V> { self.get_mut(k) }
+    fn store(&mut self, k: Self::K, v: Self::V) -> Result<&Self::V, Self::V> { self.insert(k, v) }
+    fn fetch(&mut self, k: &Self::K) -> Option<&Self::V> { self.get(k) }
     fn contains(&mut self, k: &Self::K) -> bool { self.contains_key(k) }
     fn remove(&mut self, k: &Self::K) -> Option<Self::V> { GDSFCache::remove(self, k) }
 }

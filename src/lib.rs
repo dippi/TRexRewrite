@@ -6,6 +6,7 @@ extern crate threadpool;
 extern crate linear_map;
 extern crate fnv;
 extern crate lru_cache;
+extern crate lru_size_cache;
 extern crate ordered_float;
 extern crate owning_ref;
 
