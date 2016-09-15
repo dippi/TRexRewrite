@@ -43,6 +43,9 @@ extern crate trex;
 
 use chrono::{Duration, UTC};
 use rand::Rng;
+use rand::distributions::{IndependentSample, Sample};
+use rand::distributions::exponential::Exp;
+use rand::distributions::normal::Normal;
 use rusqlite::Connection;
 use rusqlite::types::ToSql;
 use std::iter::{once, repeat};
@@ -57,6 +60,29 @@ use trex::tesla::predicates::*;
 use trex::trex::*;
 use trex::trex::sqlite::{CacheOwnership, CacheType, SqliteConfig, SqliteProvider};
 use trex::trex::stack::StackProvider;
+
+enum QueryDistribution {
+    Normal(Normal),
+    Exp(Exp),
+}
+
+impl Sample<i32> for QueryDistribution {
+    fn sample<R: Rng>(&mut self, rng: &mut R) -> i32 {
+        match *self {
+            QueryDistribution::Normal(ref mut distr) => distr.sample(rng) as i32,
+            QueryDistribution::Exp(ref mut distr) => distr.sample(rng) as i32,
+        }
+    }
+}
+
+impl IndependentSample<i32> for QueryDistribution {
+    fn ind_sample<R: Rng>(&self, rng: &mut R) -> i32 {
+        match *self {
+            QueryDistribution::Normal(ref distr) => distr.ind_sample(rng) as i32,
+            QueryDistribution::Exp(ref distr) => distr.ind_sample(rng) as i32,
+        }
+    }
+}
 
 struct Config {
     num_rules: usize,
@@ -77,8 +103,8 @@ struct Config {
     cache_size: usize,
     cache_ownership: CacheOwnership,
     cache_type: CacheType,
+    query_distribution: QueryDistribution,
     matching_rows: usize,
-    matching_range: usize,
     static_prob: f32,
 }
 
@@ -107,8 +133,9 @@ fn setup_db<R: Rng>(rng: &mut R, cfg: &Config) {
         let mut stmt = tx.prepare(&insert_query).unwrap();
 
         for i in 0..cfg.table_rows {
+            let val = rng.gen_range(-1 * cfg.table_rows as i64 / 2, cfg.table_rows as i64 / 2);
             let data: Vec<_> = once(i as i64)
-                .chain(repeat(rng.gen_range(0i64, cfg.table_rows as i64)).take(cfg.table_columns))
+                .chain(repeat(val).take(cfg.table_columns))
                 .collect();
             let reference: Vec<_> = data.iter().map(|it| it as &ToSql).collect();
             stmt.execute(&reference).unwrap();
@@ -293,10 +320,8 @@ fn generate_events<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Event> {
             let def = rng.gen_range(0, cfg.num_def) + 1;
             let state = rng.gen_range(0, cfg.num_pred);
             if state == 0 {
-                let lower_bound = rng.gen_range(0, cfg.matching_range) as i32;
-                let upper_bound =
-                    lower_bound +
-                    ((cfg.matching_rows as f32) * rng.choose(&[0.5, 1.0, 1.5]).unwrap()) as i32;
+                let lower_bound = cfg.query_distribution.ind_sample(rng);
+                let upper_bound = lower_bound + cfg.matching_rows as i32 * rng.gen_range(1, 4) / 2;
                 Event {
                     tuple: Tuple {
                         ty_id: def * 1000,
@@ -402,8 +427,8 @@ fn extended_test() {
         cache_size: 250,
         cache_ownership: CacheOwnership::PerPredicate,
         cache_type: CacheType::Lru,
+        query_distribution: QueryDistribution::Normal(Normal::new(0.0, 30.0)),
         matching_rows: 10,
-        matching_range: 30,
         static_prob: 0.2,
     };
 
