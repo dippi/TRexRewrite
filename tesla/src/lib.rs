@@ -1,10 +1,13 @@
+extern crate chrono;
+extern crate ordered_float;
+
 pub mod expressions;
 pub mod predicates;
 
 use chrono::{DateTime, UTC};
+use expressions::{BasicType, Expression, Value};
+use predicates::Predicate;
 use std::sync::Arc;
-use tesla::expressions::{BasicType, Expression, Value};
-use tesla::predicates::Predicate;
 
 #[derive(Clone, Debug)]
 pub enum TupleType {

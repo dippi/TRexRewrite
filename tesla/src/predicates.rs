@@ -1,9 +1,8 @@
-
 use chrono::Duration;
+use expressions::Expression;
 use std::string::String;
 use std::sync::Arc;
 use std::vec::Vec;
-use tesla::expressions::Expression;
 
 #[derive(Clone, Debug)]
 pub enum EventSelection {

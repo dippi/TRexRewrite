@@ -1,8 +1,7 @@
-
+use rule_processor::PartialResult;
 use super::operations::{binary, unary};
 use tesla::*;
 use tesla::expressions::*;
-use trex::rule_processor::PartialResult;
 
 fn cast(value: &Value, ty: &BasicType) -> Value {
     match (ty, value) {

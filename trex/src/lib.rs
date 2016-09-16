@@ -1,3 +1,15 @@
+extern crate chrono;
+extern crate rusqlite;
+extern crate r2d2;
+extern crate r2d2_sqlite;
+extern crate threadpool;
+extern crate linear_map;
+extern crate fnv;
+extern crate lru_cache;
+extern crate lru_size_cache;
+extern crate owning_ref;
+extern crate tesla;
+
 mod expressions;
 pub mod stack;
 mod rule_processor;
@@ -9,6 +21,8 @@ pub mod listeners;
 
 use fnv::FnvHasher;
 use linear_map::LinearMap;
+use rule_checks::check_rule;
+use rule_processor::*;
 use std::collections::{BTreeMap, HashMap};
 use std::collections::hash_map::Entry;
 use std::hash::BuildHasherDefault;
@@ -19,8 +33,6 @@ use tesla::{Engine, Event, Listener, Rule, TupleDeclaration};
 use tesla::expressions::BasicType;
 use tesla::predicates::Predicate;
 use threadpool::ThreadPool;
-use trex::rule_checks::check_rule;
-use trex::rule_processor::*;
 
 pub type FnvHashMap<K, V> = HashMap<K, V, BuildHasherDefault<FnvHasher>>;
 

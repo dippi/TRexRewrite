@@ -1,51 +1,13 @@
-// TODO Parameters:
-// * Rule
-//   - Num of predicates
-//   - Order of predicates
-// * Events
-//   - Frequency
-// * Static
-//   - Num of rows
-// * Data (both event and static)
-//   - Num of attributes / columns
-//   - Type of data
-//   - Data domain
-//   - Repetitions
-// * Events queries
-//   - Window
-// * Static queries
-//   - Load time
-// * Queries (both event and static)
-//   - Num of input params
-//   - Num of output params
-//   - Selection policy
-//   - Num of results
-//   - Selectivity (#propagated / #processed OR #results / #rows)
-//   - Variations of num of results
-//   - Filters complexity
-//   - Aggregates complexity
-// * Cache
-//   - Size
-//   - Type
-//   - Ownership
-//   - Ratio repeated vs new
-//   - Hit time vs miss time
-// * Other
-//   - Pre fetching
-//   - SQL Indexes
-
 #![feature(step_by, inclusive_range_syntax)]
 
 extern crate chrono;
 extern crate rand;
 extern crate rusqlite;
+extern crate tesla;
 extern crate trex;
 
 use chrono::{Duration, UTC};
 use rand::Rng;
-use rand::distributions::{IndependentSample, Sample};
-use rand::distributions::exponential::Exp;
-use rand::distributions::normal::Normal;
 use rusqlite::Connection;
 use rusqlite::types::ToSql;
 use std::iter::{once, repeat};
@@ -53,36 +15,13 @@ use std::ops::Add;
 use std::sync::Arc;
 use std::sync::mpsc::sync_channel;
 use std::thread;
-use trex::tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Rule, Tuple,
-                  TupleDeclaration, TupleType};
-use trex::tesla::expressions::*;
-use trex::tesla::predicates::*;
-use trex::trex::*;
-use trex::trex::sqlite::{CacheOwnership, CacheType, SqliteConfig, SqliteProvider};
-use trex::trex::stack::StackProvider;
-
-enum QueryDistribution {
-    Normal(Normal),
-    Exp(Exp),
-}
-
-impl Sample<i32> for QueryDistribution {
-    fn sample<R: Rng>(&mut self, rng: &mut R) -> i32 {
-        match *self {
-            QueryDistribution::Normal(ref mut distr) => distr.sample(rng) as i32,
-            QueryDistribution::Exp(ref mut distr) => distr.sample(rng) as i32,
-        }
-    }
-}
-
-impl IndependentSample<i32> for QueryDistribution {
-    fn ind_sample<R: Rng>(&self, rng: &mut R) -> i32 {
-        match *self {
-            QueryDistribution::Normal(ref distr) => distr.ind_sample(rng) as i32,
-            QueryDistribution::Exp(ref distr) => distr.ind_sample(rng) as i32,
-        }
-    }
-}
+use tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Rule, Tuple, TupleDeclaration,
+            TupleType};
+use tesla::expressions::*;
+use tesla::predicates::*;
+use trex::*;
+use trex::sqlite::{CacheOwnership, CacheType, SqliteConfig, SqliteProvider};
+use trex::stack::StackProvider;
 
 struct Config {
     num_rules: usize,
@@ -103,53 +42,27 @@ struct Config {
     cache_size: usize,
     cache_ownership: CacheOwnership,
     cache_type: CacheType,
-    query_distribution: QueryDistribution,
     matching_rows: usize,
+    matching_range: usize,
     static_prob: f32,
 }
 
-fn setup_db<R: Rng>(rng: &mut R, cfg: &Config) {
-    // Open database (create if not exists)
-    let mut conn = Connection::open(&cfg.db_name).unwrap();
-    let tx = conn.transaction().unwrap();
-
-    {
-        // Drop and recreate the table
-        tx.execute("DROP TABLE test", &[]).unwrap_or(0);
-
-        let columns = (0..cfg.table_columns).fold(String::new(), |acc, i| {
-            acc + &format!(", col{} INTEGER NOT NULL", i)
-        });
-        let create_query = format!("CREATE TABLE test (id INTEGER PRIMARY KEY{})", columns);
-        tx.execute(&create_query, &[]).unwrap();
-
-        // generate fill data
-        let columns = (0..cfg.table_columns)
-            .fold(String::new(), |acc, i| acc + &format!(", col{}", i));
-        let placeholders = repeat(", ?").take(cfg.table_columns).fold(String::new(), Add::add);
-        let insert_query = format!("INSERT INTO test (id{}) VALUES (?{})",
-                                   columns,
-                                   placeholders);
-        let mut stmt = tx.prepare(&insert_query).unwrap();
-
-        for i in 0..cfg.table_rows {
-            let val = rng.gen_range(-1 * cfg.table_rows as i64 / 2, cfg.table_rows as i64 / 2);
-            let data: Vec<_> = once(i as i64)
-                .chain(repeat(val).take(cfg.table_columns))
+fn db_equivalent<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Event> {
+    (0..cfg.table_rows)
+        .map(|i| {
+            let data = once(i as i32)
+                .chain(repeat(rng.gen_range(0i32, cfg.table_rows as i32)).take(cfg.table_columns))
+                .map(From::from)
                 .collect();
-            let reference: Vec<_> = data.iter().map(|it| it as &ToSql).collect();
-            stmt.execute(&reference).unwrap();
-        }
-
-        if cfg.table_indexed {
-            for i in 0..cfg.table_columns {
-                let create_query = format!("CREATE INDEX index_col{0} ON test (col{0})", i);
-                tx.execute(&create_query, &[]).unwrap();
+            Event {
+                tuple: Tuple {
+                    ty_id: 0,
+                    data: data,
+                },
+                time: UTC::now(),
             }
-        }
-    }
-
-    tx.commit().unwrap();
+        })
+        .collect()
 }
 
 fn generate_declarations<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<TupleDeclaration> {
@@ -162,7 +75,7 @@ fn generate_declarations<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<TupleDeclarat
         })
         .collect();
     let static_decl = TupleDeclaration {
-        ty: TupleType::Static,
+        ty: TupleType::Event,
         id: 0,
         name: "test".to_owned(),
         attributes: attributes,
@@ -233,7 +146,7 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
                     alias: format!("alias{}", id * 1000),
                 },
             };
-            let static_pred = if rng.next_f32() <= cfg.static_prob {
+            let last_pred = if rng.next_f32() <= cfg.static_prob {
                 let static_constr1 = Arc::new(Expression::BinaryOperation {
                     operator: BinaryOperator::GreaterEqual,
                     left: Box::new(Expression::Reference { attribute: 0 }),
@@ -259,7 +172,14 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
                     })
                     .collect();
                 Some(Predicate {
-                    ty: PredicateType::UnorderedStatic { parameters: parameters },
+                    ty: PredicateType::Event {
+                        selection: EventSelection::Each,
+                        parameters: parameters,
+                        timing: Timing {
+                            upper: cfg.num_pred - 2,
+                            bound: TimingBound::Within { window: Duration::days(100) },
+                        },
+                    },
                     tuple: ConstrainedTuple {
                         ty_id: 0,
                         constraints: vec![static_constr1, static_constr2],
@@ -298,7 +218,7 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
                 }
             });
 
-            let predicates = once(root_pred).chain(mid_preds).chain(static_pred).collect();
+            let predicates = once(root_pred).chain(mid_preds).chain(last_pred).collect();
             let event_template = EventTemplate {
                 ty_id: id,
                 attributes: Vec::new(),
@@ -320,8 +240,10 @@ fn generate_events<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Event> {
             let def = rng.gen_range(0, cfg.num_def) + 1;
             let state = rng.gen_range(0, cfg.num_pred);
             if state == 0 {
-                let lower_bound = cfg.query_distribution.ind_sample(rng);
-                let upper_bound = lower_bound + cfg.matching_rows as i32 * rng.gen_range(1, 4) / 2;
+                let lower_bound = rng.gen_range(0, cfg.matching_range) as i32;
+                let upper_bound =
+                    lower_bound +
+                    ((cfg.matching_rows as f32) * rng.choose(&[0.5, 1.0, 1.5]).unwrap()) as i32;
                 Event {
                     tuple: Tuple {
                         ty_id: def * 1000,
@@ -344,7 +266,7 @@ fn generate_events<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Event> {
 
 fn execute_bench(cfg: &Config) {
     let mut rng = rand::thread_rng();
-    setup_db(&mut rng, cfg);
+    let db_eq = db_equivalent(&mut rng, cfg);
     let decls = generate_declarations(&mut rng, cfg);
     let rules = generate_rules(&mut rng, cfg);
     let evts = generate_events(&mut rng, cfg);
@@ -367,7 +289,11 @@ fn execute_bench(cfg: &Config) {
         engine.define(rule);
     }
 
-    use trex::trex::listeners::{CountListener, DebugListener};
+    for event in db_eq {
+        engine.publish(&Arc::new(event));
+    }
+
+    use trex::listeners::{CountListener, DebugListener};
     // engine.subscribe(Box::new(DebugListener));
     engine.subscribe(Box::new(CountListener {
         count: 0,
@@ -398,8 +324,8 @@ fn execute_bench(cfg: &Config) {
              (UTC::now() - start).num_milliseconds());
 }
 
-#[test]
-fn extended_test() {
+
+fn main() {
     println!("");
     let freq = 3_000;
     println!("- Frequency: {:5} evt/sec", freq);
@@ -412,7 +338,7 @@ fn extended_test() {
         num_rules: 1000,
         num_def: 100,
         num_pred: 3,
-        num_events: 50_000,
+        num_events: 150_000,
         each_prob: 1.0,
         first_prob: 0.0,
         min_win: min_win,
@@ -422,14 +348,14 @@ fn extended_test() {
         evts_per_sec: freq,
         db_name: "./database.db".to_owned(),
         table_columns: 1,
-        table_rows: 100_000,
+        table_rows: 1_000,
         table_indexed: true,
         cache_size: 250,
         cache_ownership: CacheOwnership::PerPredicate,
         cache_type: CacheType::Lru,
-        query_distribution: QueryDistribution::Normal(Normal::new(0.0, 30.0)),
         matching_rows: 10,
-        static_prob: 0.2,
+        matching_range: 30,
+        static_prob: 0.05,
     };
 
     execute_bench(&cfg);

@@ -1,12 +1,11 @@
-
+use FnvHashMap;
 use chrono::{DateTime, UTC};
+use expressions::evaluation::*;
 use linear_map::LinearMap;
 use std::sync::Arc;
 use tesla::{Event, Rule, Tuple};
 use tesla::expressions::Value;
 use tesla::predicates::*;
-use trex::FnvHashMap;
-use trex::expressions::evaluation::*;
 
 #[derive(Clone, Debug)]
 pub struct PartialResult {

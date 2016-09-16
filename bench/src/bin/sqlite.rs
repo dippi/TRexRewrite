@@ -2,6 +2,7 @@
 
 extern crate rand;
 extern crate chrono;
+extern crate tesla;
 extern crate trex;
 
 use chrono::{Duration, UTC};
@@ -9,13 +10,13 @@ use rand::Rng;
 use std::sync::Arc;
 use std::sync::mpsc::sync_channel;
 use std::thread;
-use trex::tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Listener, Rule, Tuple,
-                  TupleDeclaration, TupleType};
-use trex::tesla::expressions::*;
-use trex::tesla::predicates::*;
-use trex::trex::*;
-use trex::trex::sqlite::{CacheOwnership, CacheType, SqliteConfig, SqliteProvider};
-use trex::trex::stack::StackProvider;
+use tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Listener, Rule, Tuple,
+            TupleDeclaration, TupleType};
+use tesla::expressions::*;
+use tesla::predicates::*;
+use trex::*;
+use trex::sqlite::{CacheOwnership, CacheType, SqliteConfig, SqliteProvider};
+use trex::stack::StackProvider;
 
 struct Config {
     num_rules: usize,
@@ -248,8 +249,7 @@ fn execute_bench_length(cfg: &Config) {
              (UTC::now() - start).num_milliseconds());
 }
 
-#[test]
-fn sqlite_length() {
+fn main() {
     let mut cfg = Config {
         num_rules: 1000,
         num_def: 100,

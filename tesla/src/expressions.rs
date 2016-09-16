@@ -1,4 +1,3 @@
-
 use ordered_float::NotNaN;
 use std::hash::{Hash, Hasher};
 

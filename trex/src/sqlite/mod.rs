@@ -1,11 +1,16 @@
 mod query_builder;
 
+use NodeProvider;
+use cache::{Cache, CachedFetcher, CollisionCache, DummyCache, Fetcher, ModBuildHasher};
+use cache::gdfs_cache::{GDSFCache, HasCost, HasSize};
 use chrono::UTC;
+use expressions::evaluation::*;
 use linear_map::LinearMap;
 use lru_cache::LruCache;
 use lru_size_cache::{HasSize as LruHasSize, LruSizeCache};
 use r2d2::{Config, Pool};
 use r2d2_sqlite::SqliteConnectionManager;
+use rule_processor::*;
 use rusqlite::Row;
 use rusqlite::types::{ToSql, Value as SqlValue};
 use self::query_builder::SqlContext;
@@ -15,11 +20,6 @@ use std::usize;
 use tesla::*;
 use tesla::expressions::*;
 use tesla::predicates::*;
-use trex::NodeProvider;
-use trex::cache::{Cache, CachedFetcher, CollisionCache, DummyCache, Fetcher, ModBuildHasher};
-use trex::cache::gdfs_cache::{GDSFCache, HasCost, HasSize};
-use trex::expressions::evaluation::*;
-use trex::rule_processor::*;
 
 #[derive(Debug, Hash, PartialEq, Eq)]
 pub struct CacheKey {
