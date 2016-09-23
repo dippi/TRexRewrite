@@ -37,18 +37,23 @@
 #![feature(step_by, inclusive_range_syntax)]
 
 extern crate chrono;
+extern crate clap;
 extern crate rand;
+extern crate regex;
 extern crate rusqlite;
 extern crate tesla;
 extern crate trex;
 
 use chrono::{Duration, UTC};
+use clap::{App, Arg};
 use rand::Rng;
 use rand::distributions::{IndependentSample, Sample};
 use rand::distributions::exponential::Exp;
 use rand::distributions::normal::Normal;
+use regex::Regex;
 use rusqlite::Connection;
 use rusqlite::types::ToSql;
+use std::fmt;
 use std::iter::{once, repeat};
 use std::ops::Add;
 use std::sync::Arc;
@@ -65,6 +70,15 @@ use trex::stack::StackProvider;
 enum QueryDistribution {
     Normal(Normal),
     Exp(Exp),
+}
+
+impl fmt::Debug for QueryDistribution {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            QueryDistribution::Normal(..) => write!(f, "Normal"),
+            QueryDistribution::Exp(..) => write!(f, "Exp"),
+        }
+    }
 }
 
 impl Sample<i32> for QueryDistribution {
@@ -85,6 +99,7 @@ impl IndependentSample<i32> for QueryDistribution {
     }
 }
 
+#[derive(Debug)]
 struct Config {
     num_rules: usize,
     num_def: usize,
@@ -401,37 +416,148 @@ fn execute_bench(cfg: &Config) {
 
 
 fn main() {
-    println!("");
-    let freq = 3_000;
-    println!("- Frequency: {:5} evt/sec", freq);
-    let avg_win = 2;
-    let max_win = Duration::seconds(avg_win + 1 as i64);
-    let min_win = Duration::seconds(avg_win - 1 as i64);
-    print!(" > Avg Window: {:2}s => ", avg_win);
+    let matches = App::new("TRex Extended Testing")
+        .arg(Arg::with_name("num_rules")
+            .long("num_rules")
+            .value_name("INT")
+            .takes_value(true))
+        .arg(Arg::with_name("num_def")
+            .long("num_def")
+            .value_name("INT")
+            .takes_value(true))
+        .arg(Arg::with_name("num_pred")
+            .long("num_pred")
+            .value_name("INT")
+            .takes_value(true))
+        .arg(Arg::with_name("num_events")
+            .long("num_events")
+            .value_name("INT")
+            .takes_value(true))
+        .arg(Arg::with_name("each_prob")
+            .long("each_prob")
+            .value_name("FLOAT")
+            .takes_value(true))
+        .arg(Arg::with_name("first_prob")
+            .long("first_prob")
+            .value_name("FLOAT")
+            .takes_value(true))
+        .arg(Arg::with_name("avg_win")
+            .long("avg_win")
+            .value_name("INT")
+            .takes_value(true))
+        .arg(Arg::with_name("consuming").long("consuming"))
+        .arg(Arg::with_name("queue_len")
+            .long("queue_len")
+            .value_name("INT")
+            .takes_value(true))
+        .arg(Arg::with_name("evts_per_sec")
+            .long("evts_per_sec")
+            .value_name("INT")
+            .takes_value(true))
+        .arg(Arg::with_name("db_name")
+            .long("db_name")
+            .value_name("FILE")
+            .takes_value(true))
+        .arg(Arg::with_name("table_columns")
+            .long("table_columns")
+            .value_name("INT")
+            .takes_value(true))
+        .arg(Arg::with_name("table_rows")
+            .long("table_rows")
+            .value_name("INT")
+            .takes_value(true))
+        .arg(Arg::with_name("no_table_index").long("no_table_index"))
+        .arg(Arg::with_name("cache_size")
+            .long("cache_size")
+            .value_name("INT")
+            .takes_value(true))
+        .arg(Arg::with_name("cache_ownership")
+            .long("cache_ownership")
+            .value_name("VAL")
+            .help("SHARED|PER_PREDICATE")
+            .takes_value(true))
+        .arg(Arg::with_name("cache_type")
+            .long("cache_type")
+            .value_name("VAL")
+            .help("DUMMY|LRU|LRU_SIZE|COLLISION|GDSF")
+            .takes_value(true))
+        .arg(Arg::with_name("query_distribution")
+            .long("query_distribution")
+            .value_name("VAL")
+            .help("Normal(sigma)|Exp(lambda)")
+            .takes_value(true))
+        .arg(Arg::with_name("matching_rows")
+            .long("matching_rows")
+            .value_name("INT")
+            .takes_value(true))
+        .arg(Arg::with_name("static_prob")
+            .long("static_prob")
+            .value_name("FLOAT")
+            .takes_value(true))
+        .get_matches();
 
-    let mut cfg = Config {
-        num_rules: 1000,
-        num_def: 100,
-        num_pred: 3,
-        num_events: 50_000,
-        each_prob: 1.0,
-        first_prob: 0.0,
+    let avg_win = matches.value_of("avg_win").map(|it| it.parse().unwrap()).unwrap_or(2000);
+    let max_win = Duration::milliseconds(avg_win + 1000 as i64);
+    let min_win = Duration::milliseconds(avg_win - 1000 as i64);
+
+    let cfg = Config {
+        num_rules: matches.value_of("num_rules").map(|it| it.parse().unwrap()).unwrap_or(1000),
+        num_def: matches.value_of("num_def").map(|it| it.parse().unwrap()).unwrap_or(100),
+        num_pred: matches.value_of("num_pred").map(|it| it.parse().unwrap()).unwrap_or(3),
+        num_events: matches.value_of("num_events").map(|it| it.parse().unwrap()).unwrap_or(50_000),
+        each_prob: matches.value_of("each_prob").map(|it| it.parse().unwrap()).unwrap_or(1.0),
+        first_prob: matches.value_of("first_prob").map(|it| it.parse().unwrap()).unwrap_or(0.0),
         min_win: min_win,
         max_win: max_win,
-        consuming: false,
-        queue_len: 250,
-        evts_per_sec: freq,
-        db_name: "./database.db".to_owned(),
-        table_columns: 1,
-        table_rows: 100_000,
-        table_indexed: true,
-        cache_size: 250,
-        cache_ownership: CacheOwnership::PerPredicate,
-        cache_type: CacheType::Lru,
-        query_distribution: QueryDistribution::Normal(Normal::new(0.0, 30.0)),
-        matching_rows: 10,
-        static_prob: 0.2,
+        consuming: matches.is_present("consuming"),
+        queue_len: matches.value_of("queue_len").map(|it| it.parse().unwrap()).unwrap_or(250),
+        evts_per_sec: matches.value_of("evts_per_sec")
+            .map(|it| it.parse().unwrap())
+            .unwrap_or(3_000),
+        db_name: matches.value_of("db_name").unwrap_or("./database.db").to_owned(),
+        table_columns: matches.value_of("table_columns").map(|it| it.parse().unwrap()).unwrap_or(1),
+        table_rows: matches.value_of("table_rows").map(|it| it.parse().unwrap()).unwrap_or(100_000),
+        table_indexed: !matches.is_present("no_table_index"),
+        cache_size: matches.value_of("cache_size").map(|it| it.parse().unwrap()).unwrap_or(250),
+        cache_ownership: matches.value_of("cache_ownership")
+            .map(|it| {
+                match it {
+                    "SHARED" => CacheOwnership::Shared,
+                    "PER_PREDICATE" => CacheOwnership::PerPredicate,
+                    _ => panic!("Unexpected cache ownership"),
+                }
+            })
+            .unwrap_or(CacheOwnership::Shared),
+        cache_type: matches.value_of("cache_type")
+            .map(|it| {
+                match it {
+                    "DUMMY" => CacheType::Dummy,
+                    "LRU" => CacheType::Lru,
+                    "COLLISION" => CacheType::Collision,
+                    "LRU_SIZE" => CacheType::LruSize,
+                    "GDSF" => CacheType::Gdfs,
+                    _ => panic!("Unexpected cache type"),
+                }
+            })
+            .unwrap_or(CacheType::Lru),
+        query_distribution: matches.value_of("query_distribution")
+            .map(|it| {
+                let cap = Regex::new("(Normal|Exp)\\((.+)\\)").unwrap().captures(it).unwrap();
+                let par = cap.at(2).unwrap().parse().unwrap();
+                match cap.at(1).unwrap() {
+                    "Normal" => QueryDistribution::Normal(Normal::new(0.0, par)),
+                    "Exp" => QueryDistribution::Exp(Exp::new(par)),
+                    _ => panic!("Unexpected distribution type"),
+                }
+            })
+            .unwrap_or(QueryDistribution::Normal(Normal::new(0.0, 30.0))),
+        matching_rows: matches.value_of("matching_rows")
+            .map(|it| it.parse().unwrap())
+            .unwrap_or(10),
+        static_prob: matches.value_of("static_prob").map(|it| it.parse().unwrap()).unwrap_or(0.2),
     };
+
+    println!("{:?}", &cfg);
 
     execute_bench(&cfg);
 }
