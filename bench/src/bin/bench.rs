@@ -170,7 +170,7 @@ fn execute_bench_length(cfg: &Config) {
     let evts = generate_length_events(&mut rng, &cfg);
 
     let providers: Vec<Box<NodeProvider>> = vec![Box::new(StackProvider)];
-    let mut engine = TRex::new(providers);
+    let mut engine = TRex::new(4, providers);
     for decl in decls {
         engine.declare(decl);
     }

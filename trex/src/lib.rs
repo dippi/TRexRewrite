@@ -93,14 +93,14 @@ pub struct TRex {
 }
 
 impl TRex {
-    pub fn new(providers: Vec<Box<NodeProvider>>) -> TRex {
+    pub fn new(threads: usize, providers: Vec<Box<NodeProvider>>) -> TRex {
         TRex {
             tuples: FnvHashMap::default(),
             provider: GeneralProvider::with_providers(providers),
             reverse_index: FnvHashMap::default(),
             listeners: BTreeMap::new(),
             last_id: 0,
-            threadpool: ThreadPool::new(4),
+            threadpool: ThreadPool::new(threads),
             channel: channel(),
         }
     }

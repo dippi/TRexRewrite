@@ -34,10 +34,9 @@
 //   - Pre fetching
 //   - SQL Indexes
 
-#![feature(step_by, inclusive_range_syntax)]
-
 extern crate chrono;
 extern crate clap;
+extern crate num_cpus;
 extern crate rand;
 extern crate regex;
 extern crate rusqlite;
@@ -46,7 +45,7 @@ extern crate trex;
 
 use chrono::{Duration, UTC};
 use clap::{App, Arg};
-use rand::Rng;
+use rand::{Rng, SeedableRng, StdRng};
 use rand::distributions::{IndependentSample, Sample};
 use rand::distributions::exponential::Exp;
 use rand::distributions::normal::Normal;
@@ -101,6 +100,8 @@ impl IndependentSample<i32> for QueryDistribution {
 
 #[derive(Debug)]
 struct Config {
+    seed: usize,
+    threads: usize,
     num_rules: usize,
     num_def: usize,
     num_pred: usize,
@@ -358,12 +359,11 @@ fn generate_events<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Event> {
         .collect()
 }
 
-fn execute_bench(cfg: &Config) {
-    let mut rng = rand::thread_rng();
-    setup_db(&mut rng, cfg);
-    let decls = generate_declarations(&mut rng, cfg);
-    let rules = generate_rules(&mut rng, cfg);
-    let evts = generate_events(&mut rng, cfg);
+fn execute_bench<R: Rng>(rng: &mut R, cfg: &Config) {
+    setup_db(rng, cfg);
+    let decls = generate_declarations(rng, cfg);
+    let rules = generate_rules(rng, cfg);
+    let evts = generate_events(rng, cfg);
 
     let sqlite_config = SqliteConfig {
         db_file: cfg.db_name.clone(),
@@ -375,7 +375,7 @@ fn execute_bench(cfg: &Config) {
     let sqlite_provider = Box::new(SqliteProvider::new(sqlite_config));
     let providers: Vec<Box<NodeProvider>> = vec![Box::new(StackProvider), sqlite_provider];
 
-    let mut engine = TRex::new(providers);
+    let mut engine = TRex::new(cfg.threads, providers);
     for decl in decls {
         engine.declare(decl);
     }
@@ -417,6 +417,14 @@ fn execute_bench(cfg: &Config) {
 
 fn main() {
     let matches = App::new("TRex Extended Testing")
+        .arg(Arg::with_name("seed")
+            .long("seed")
+            .value_name("INT")
+            .takes_value(true))
+        .arg(Arg::with_name("threads")
+            .long("threads")
+            .value_name("INT")
+            .takes_value(true))
         .arg(Arg::with_name("num_rules")
             .long("num_rules")
             .value_name("INT")
@@ -501,6 +509,10 @@ fn main() {
     let min_win = Duration::milliseconds(avg_win - 1000 as i64);
 
     let cfg = Config {
+        seed: matches.value_of("seed").map(|it| it.parse().unwrap()).unwrap_or(rand::random()),
+        threads: matches.value_of("threads")
+            .map(|it| it.parse().unwrap())
+            .unwrap_or(num_cpus::get()),
         num_rules: matches.value_of("num_rules").map(|it| it.parse().unwrap()).unwrap_or(1000),
         num_def: matches.value_of("num_def").map(|it| it.parse().unwrap()).unwrap_or(100),
         num_pred: matches.value_of("num_pred").map(|it| it.parse().unwrap()).unwrap_or(3),
@@ -559,5 +571,5 @@ fn main() {
 
     println!("{:?}", &cfg);
 
-    execute_bench(&cfg);
+    execute_bench(&mut StdRng::from_seed(&[cfg.seed]), &cfg);
 }

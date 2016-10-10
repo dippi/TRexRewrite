@@ -281,7 +281,7 @@ fn execute_bench(cfg: &Config) {
     let sqlite_provider = Box::new(SqliteProvider::new(sqlite_config));
     let providers: Vec<Box<NodeProvider>> = vec![Box::new(StackProvider), sqlite_provider];
 
-    let mut engine = TRex::new(providers);
+    let mut engine = TRex::new(4, providers);
     for decl in decls {
         engine.declare(decl);
     }
