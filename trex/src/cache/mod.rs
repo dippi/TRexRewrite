@@ -8,10 +8,17 @@ use self::gdfs_cache::{GDSFCache, HasCost, HasSize};
 use self::ownable::Ownable;
 use std::borrow::Borrow;
 use std::collections::hash_map::{Entry, HashMap, RandomState};
-use std::hash::{BuildHasher, Hash, Hasher};
+use std::hash::{BuildHasher, Hash, Hasher, SipHasher};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+fn hash<T: Hash>(t: &T) -> u64 {
+    let mut s = SipHasher::new();
+    t.hash(&mut s);
+    s.finish()
+}
 
 pub trait Cache {
     type K;
@@ -41,6 +48,44 @@ impl<'a, C: Cache + ?Sized + 'a> Deref for FetchedValue<'a, C> {
     }
 }
 
+#[derive(Default)]
+pub struct HitMissCounter {
+    hit: AtomicUsize,
+    ind_hit: AtomicUsize,
+    miss: AtomicUsize,
+    last: AtomicUsize,
+}
+
+impl HitMissCounter {
+    pub fn hit(&self, hash: u64) {
+        if hash as usize != self.last.load(Ordering::SeqCst) {
+            self.ind_hit.fetch_add(1, Ordering::SeqCst);
+        }
+        self.hit.fetch_add(1, Ordering::SeqCst);
+        self.last.store(hash as usize, Ordering::SeqCst)
+    }
+    pub fn miss(&self, hash: u64) {
+        self.miss.fetch_add(1, Ordering::SeqCst);
+        self.last.store(hash as usize, Ordering::SeqCst)
+    }
+}
+
+impl Drop for HitMissCounter {
+    fn drop(&mut self) {
+        let hit = self.hit.load(Ordering::SeqCst);
+        let ind_hit = self.ind_hit.load(Ordering::SeqCst);
+        let miss = self.miss.load(Ordering::SeqCst);
+        let ratio = (miss as f32 / (hit + miss) as f32) * 100.0;
+        let ind_ratio = (miss as f32 / (ind_hit + miss) as f32) * 100.0;
+        println!("Fetcher stats: {} hits, {} ind_hit, {} miss ({}%, {}%)",
+                 hit,
+                 ind_hit,
+                 miss,
+                 ratio,
+                 ind_ratio);
+    }
+}
+
 pub struct CachedFetcher<C: ?Sized, F>
     where C: Cache,
           F: Fetcher<C::K, C::V>
@@ -48,16 +93,18 @@ pub struct CachedFetcher<C: ?Sized, F>
     // TODO make member variables private
     pub cache: Arc<Mutex<C>>,
     pub fetcher: F,
+    stat: Arc<HitMissCounter>,
 }
 
 impl<C, F> CachedFetcher<C, F>
     where C: Cache + Default,
           F: Fetcher<C::K, C::V>
 {
-    pub fn new(fetcher: F) -> Self {
+    pub fn new(fetcher: F, stat: Arc<HitMissCounter>) -> Self {
         CachedFetcher {
             cache: Arc::default(),
             fetcher: fetcher,
+            stat: stat,
         }
     }
 }
@@ -66,10 +113,11 @@ impl<C: ?Sized, F> CachedFetcher<C, F>
     where C: Cache,
           F: Fetcher<C::K, C::V>
 {
-    pub fn with_cache(cache: Arc<Mutex<C>>, fetcher: F) -> Self {
+    pub fn with_cache(cache: Arc<Mutex<C>>, fetcher: F, stat: Arc<HitMissCounter>) -> Self {
         CachedFetcher {
             cache: cache,
             fetcher: fetcher,
+            stat: stat,
         }
     }
 }
@@ -79,13 +127,15 @@ impl<C: ?Sized, F> CachedFetcher<C, F>
           F: Fetcher<C::K, C::V>
 {
     pub fn fetch<Q>(&self, key: Q) -> FetchedValue<C>
-        where Q: Borrow<C::K> + Ownable<C::K>
+        where Q: Borrow<C::K> + Ownable<C::K> + Hash
     {
         let mut cache = MutexGuardRefMut::new(self.cache.lock().unwrap());
         if cache.contains(key.borrow()) {
+            self.stat.hit(hash(&key));
             FetchedValue::Cached(cache.map(|cache| cache.fetch(key.borrow()).unwrap()).into())
         } else {
             drop(cache);
+            self.stat.miss(hash(&key));
             let value = self.fetcher.fetch(key.borrow());
             MutexGuardRefMut::new(self.cache.lock().unwrap())
                 .try_map(|cache| cache.store(key.into_owned(), value))

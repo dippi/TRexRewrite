@@ -1,7 +1,8 @@
 mod query_builder;
 
 use NodeProvider;
-use cache::{Cache, CachedFetcher, CollisionCache, DummyCache, Fetcher, ModBuildHasher};
+use cache::{Cache, CachedFetcher, CollisionCache, DummyCache, Fetcher, HitMissCounter,
+            ModBuildHasher};
 use cache::gdfs_cache::{GDSFCache, HasCost, HasSize};
 use chrono::UTC;
 use expressions::evaluation::*;
@@ -164,7 +165,8 @@ impl<C: SqlCache + ?Sized> SQLiteDriver<C> {
                predicate: &Predicate,
                parameters_ty: &LinearMap<(usize, usize), BasicType>,
                pool: Pool<SqliteConnectionManager>,
-               cache: Arc<Mutex<C>>)
+               cache: Arc<Mutex<C>>,
+               stat: Arc<HitMissCounter>)
                -> Option<Self> {
         if let TupleType::Static = tuple.ty {
             let mut input_params = predicate.get_used_parameters();
@@ -189,7 +191,7 @@ impl<C: SqlCache + ?Sized> SQLiteDriver<C> {
 
             Some(SQLiteDriver {
                 idx: idx,
-                fetcher: CachedFetcher::with_cache(cache, fetcher),
+                fetcher: CachedFetcher::with_cache(cache, fetcher, stat),
             })
         } else {
             None
@@ -301,6 +303,7 @@ fn make_cache(ty: CacheType,
 pub struct SqliteProvider {
     pool: Pool<SqliteConnectionManager>,
     cache: Result<Arc<Mutex<Cache<K = CacheKey, V = CacheEntry> + Send>>, (CacheType, usize)>,
+    stat: Arc<HitMissCounter>,
 }
 
 impl SqliteProvider {
@@ -316,6 +319,7 @@ impl SqliteProvider {
         SqliteProvider {
             pool: Pool::new(config, manager).unwrap(),
             cache: cache,
+            stat: Default::default(),
         }
     }
 }
@@ -332,7 +336,13 @@ impl NodeProvider for SqliteProvider {
             Err((ty, capacity)) => make_cache(ty, capacity),
         };
         let pool = self.pool.clone();
-        SQLiteDriver::new(idx, tuple, predicate, parameters_ty, pool, cache)
+        SQLiteDriver::new(idx,
+                          tuple,
+                          predicate,
+                          parameters_ty,
+                          pool,
+                          cache,
+                          self.stat.clone())
             .map(|it| Box::new(it) as Box<EventProcessor>)
     }
 }
