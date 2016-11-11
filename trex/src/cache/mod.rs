@@ -1,6 +1,7 @@
 pub mod ownable;
 pub mod gdfs_cache;
 
+use chrono::{Duration, UTC};
 use lru_cache::LruCache;
 use lru_size_cache::{HasSize as LruHasSize, LruSizeCache};
 use owning_ref::{MutexGuardRef, MutexGuardRefMut};
@@ -54,18 +55,22 @@ pub struct HitMissCounter {
     ind_hit: AtomicUsize,
     miss: AtomicUsize,
     last: AtomicUsize,
+    hit_time: AtomicUsize,
+    miss_time: AtomicUsize,
 }
 
 impl HitMissCounter {
-    pub fn hit(&self, hash: u64) {
+    pub fn hit(&self, hash: u64, time: Duration) {
         if hash as usize != self.last.load(Ordering::SeqCst) {
             self.ind_hit.fetch_add(1, Ordering::SeqCst);
         }
         self.hit.fetch_add(1, Ordering::SeqCst);
+        self.hit_time.fetch_add(time.num_nanoseconds().unwrap() as usize, Ordering::SeqCst);
         self.last.store(hash as usize, Ordering::SeqCst)
     }
-    pub fn miss(&self, hash: u64) {
+    pub fn miss(&self, hash: u64, time: Duration) {
         self.miss.fetch_add(1, Ordering::SeqCst);
+        self.miss_time.fetch_add(time.num_nanoseconds().unwrap() as usize, Ordering::SeqCst);
         self.last.store(hash as usize, Ordering::SeqCst)
     }
 }
@@ -77,12 +82,17 @@ impl Drop for HitMissCounter {
         let miss = self.miss.load(Ordering::SeqCst);
         let ratio = (miss as f32 / (hit + miss) as f32) * 100.0;
         let ind_ratio = (miss as f32 / (ind_hit + miss) as f32) * 100.0;
-        println!("Fetcher stats: {} hits, {} ind_hit, {} miss ({}%, {}%)",
+        let avg_hit_time = self.hit_time.load(Ordering::SeqCst) / (hit + 1);
+        let avg_miss_time = self.miss_time.load(Ordering::SeqCst) / (miss + 1);
+        println!("Fetcher stats: {} hits, {} ind_hit, {} miss ({}%, {}%), avg hit/miss time {}ns \
+                  {}ns",
                  hit,
                  ind_hit,
                  miss,
                  ratio,
-                 ind_ratio);
+                 ind_ratio,
+                 avg_hit_time,
+                 avg_miss_time);
     }
 }
 
@@ -129,14 +139,15 @@ impl<C: ?Sized, F> CachedFetcher<C, F>
     pub fn fetch<Q>(&self, key: Q) -> FetchedValue<C>
         where Q: Borrow<C::K> + Ownable<C::K> + Hash
     {
+        let start = UTC::now();
         let mut cache = MutexGuardRefMut::new(self.cache.lock().unwrap());
         if cache.contains(key.borrow()) {
-            self.stat.hit(hash(&key));
+            self.stat.hit(hash(&key), UTC::now() - start);
             FetchedValue::Cached(cache.map(|cache| cache.fetch(key.borrow()).unwrap()).into())
         } else {
             drop(cache);
-            self.stat.miss(hash(&key));
             let value = self.fetcher.fetch(key.borrow());
+            self.stat.miss(hash(&key), UTC::now() - start);
             MutexGuardRefMut::new(self.cache.lock().unwrap())
                 .try_map(|cache| cache.store(key.into_owned(), value))
                 .map(FetchedValue::Cached)
