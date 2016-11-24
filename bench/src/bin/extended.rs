@@ -46,9 +46,7 @@ extern crate trex;
 use chrono::{Duration, UTC};
 use clap::{App, Arg};
 use rand::{Rng, SeedableRng, StdRng};
-use rand::distributions::{IndependentSample, Sample};
-use rand::distributions::exponential::Exp;
-use rand::distributions::normal::Normal;
+use rand::distributions::{Exp, IndependentSample, Normal, Range, Sample};
 use regex::Regex;
 use rusqlite::Connection;
 use rusqlite::types::ToSql;
@@ -69,6 +67,7 @@ use trex::stack::StackProvider;
 enum QueryDistribution {
     Normal(Normal),
     Exp(Exp),
+    Uniform(Range<i32>),
 }
 
 impl fmt::Debug for QueryDistribution {
@@ -76,6 +75,7 @@ impl fmt::Debug for QueryDistribution {
         match *self {
             QueryDistribution::Normal(..) => write!(f, "Normal"),
             QueryDistribution::Exp(..) => write!(f, "Exp"),
+            QueryDistribution::Uniform(..) => write!(f, "Uniform"),
         }
     }
 }
@@ -85,6 +85,7 @@ impl Sample<i32> for QueryDistribution {
         match *self {
             QueryDistribution::Normal(ref mut distr) => distr.sample(rng) as i32,
             QueryDistribution::Exp(ref mut distr) => distr.sample(rng) as i32,
+            QueryDistribution::Uniform(ref mut distr) => distr.sample(rng),
         }
     }
 }
@@ -94,6 +95,7 @@ impl IndependentSample<i32> for QueryDistribution {
         match *self {
             QueryDistribution::Normal(ref distr) => distr.ind_sample(rng) as i32,
             QueryDistribution::Exp(ref distr) => distr.ind_sample(rng) as i32,
+            QueryDistribution::Uniform(ref distr) => distr.ind_sample(rng),
         }
     }
 }
@@ -492,7 +494,7 @@ fn main() {
         .arg(Arg::with_name("query_distribution")
             .long("query_distribution")
             .value_name("VAL")
-            .help("Normal(sigma)|Exp(lambda)")
+            .help("Normal(sigma)|Exp(lambda)|Uniform(range)")
             .takes_value(true))
         .arg(Arg::with_name("matching_rows")
             .long("matching_rows")
@@ -554,11 +556,16 @@ fn main() {
             .unwrap_or(CacheType::Lru),
         query_distribution: matches.value_of("query_distribution")
             .map(|it| {
-                let cap = Regex::new("(Normal|Exp)\\((.+)\\)").unwrap().captures(it).unwrap();
-                let par = cap.at(2).unwrap().parse().unwrap();
+                let cap =
+                    Regex::new("(Normal|Exp|Uniform)\\((.+)\\)").unwrap().captures(it).unwrap();
+                let par: f64 = cap.at(2).unwrap().parse().unwrap();
                 match cap.at(1).unwrap() {
                     "Normal" => QueryDistribution::Normal(Normal::new(0.0, par)),
                     "Exp" => QueryDistribution::Exp(Exp::new(par)),
+                    "Uniform" => {
+                        QueryDistribution::Uniform(Range::new((-par / 2.0) as i32,
+                                                              (par / 2.0) as i32))
+                    }
                     _ => panic!("Unexpected distribution type"),
                 }
             })
