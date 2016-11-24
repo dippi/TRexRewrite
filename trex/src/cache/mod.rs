@@ -9,17 +9,11 @@ use self::gdfs_cache::{GDSFCache, HasCost, HasSize};
 use self::ownable::Ownable;
 use std::borrow::Borrow;
 use std::collections::hash_map::{Entry, HashMap, RandomState};
-use std::hash::{BuildHasher, Hash, Hasher, SipHasher};
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
-
-fn hash<T: Hash>(t: &T) -> u64 {
-    let mut s = SipHasher::new();
-    t.hash(&mut s);
-    s.finish()
-}
 
 pub trait Cache {
     type K;
@@ -52,45 +46,33 @@ impl<'a, C: Cache + ?Sized + 'a> Deref for FetchedValue<'a, C> {
 #[derive(Default)]
 pub struct HitMissCounter {
     hit: AtomicUsize,
-    ind_hit: AtomicUsize,
     miss: AtomicUsize,
-    last: AtomicUsize,
     hit_time: AtomicUsize,
     miss_time: AtomicUsize,
 }
 
 impl HitMissCounter {
-    pub fn hit(&self, hash: u64, time: Duration) {
-        if hash as usize != self.last.load(Ordering::SeqCst) {
-            self.ind_hit.fetch_add(1, Ordering::SeqCst);
-        }
+    pub fn hit(&self, time: Duration) {
         self.hit.fetch_add(1, Ordering::SeqCst);
         self.hit_time.fetch_add(time.num_nanoseconds().unwrap() as usize, Ordering::SeqCst);
-        self.last.store(hash as usize, Ordering::SeqCst)
     }
-    pub fn miss(&self, hash: u64, time: Duration) {
+    pub fn miss(&self, time: Duration) {
         self.miss.fetch_add(1, Ordering::SeqCst);
         self.miss_time.fetch_add(time.num_nanoseconds().unwrap() as usize, Ordering::SeqCst);
-        self.last.store(hash as usize, Ordering::SeqCst)
     }
 }
 
 impl Drop for HitMissCounter {
     fn drop(&mut self) {
         let hit = self.hit.load(Ordering::SeqCst);
-        let ind_hit = self.ind_hit.load(Ordering::SeqCst);
         let miss = self.miss.load(Ordering::SeqCst);
         let ratio = (miss as f32 / (hit + miss) as f32) * 100.0;
-        let ind_ratio = (miss as f32 / (ind_hit + miss) as f32) * 100.0;
         let avg_hit_time = self.hit_time.load(Ordering::SeqCst) / (hit + 1);
         let avg_miss_time = self.miss_time.load(Ordering::SeqCst) / (miss + 1);
-        println!("Fetcher stats: {} hits, {} ind_hit, {} miss ({}%, {}%), avg hit/miss time {}ns \
-                  {}ns",
+        println!("Fetcher stats: {} hits, {} miss ({}%), avg hit/miss time {}ns {}ns",
                  hit,
-                 ind_hit,
                  miss,
                  ratio,
-                 ind_ratio,
                  avg_hit_time,
                  avg_miss_time);
     }
@@ -137,17 +119,17 @@ impl<C: ?Sized, F> CachedFetcher<C, F>
           F: Fetcher<C::K, C::V>
 {
     pub fn fetch<Q>(&self, key: Q) -> FetchedValue<C>
-        where Q: Borrow<C::K> + Ownable<C::K> + Hash
+        where Q: Borrow<C::K> + Ownable<C::K>
     {
         let start = UTC::now();
         let mut cache = MutexGuardRefMut::new(self.cache.lock().unwrap());
         if cache.contains(key.borrow()) {
-            self.stat.hit(hash(&key), UTC::now() - start);
+            self.stat.hit(UTC::now() - start);
             FetchedValue::Cached(cache.map(|cache| cache.fetch(key.borrow()).unwrap()).into())
         } else {
             drop(cache);
             let value = self.fetcher.fetch(key.borrow());
-            self.stat.miss(hash(&key), UTC::now() - start);
+            self.stat.miss(UTC::now() - start);
             MutexGuardRefMut::new(self.cache.lock().unwrap())
                 .try_map(|cache| cache.store(key.into_owned(), value))
                 .map(FetchedValue::Cached)
