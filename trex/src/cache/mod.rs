@@ -10,12 +10,18 @@ use self::gds1_cache::GDS1Cache;
 use self::gdsf_cache::{GDSFCache, HasCost, HasSize};
 use self::ownable::Ownable;
 use std::borrow::Borrow;
-use std::collections::hash_map::{Entry, HashMap, RandomState};
+use std::collections::hash_map::{DefaultHasher, Entry, HashMap, RandomState};
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+fn hash<T: Hash>(t: &T) -> u64 {
+    let mut s = DefaultHasher::new();
+    t.hash(&mut s);
+    s.finish()
+}
 
 pub trait Cache {
     type K;
@@ -210,61 +216,70 @@ impl<K, V, S> Cache for LruSizeCache<K, V, S>
     fn remove(&mut self, k: &Self::K) -> Option<Self::V> { LruSizeCache::remove(self, k) }
 }
 
-pub struct ModHasher<H: Hasher> {
-    hasher: H,
+pub struct CollisionCache<K, V, S = RandomState> {
+    map: HashMap<u64, (K, V), S>,
     modulus: u64,
 }
 
-impl<H: Hasher> Hasher for ModHasher<H> {
-    fn finish(&self) -> u64 { self.hasher.finish() % self.modulus }
-    fn write(&mut self, bytes: &[u8]) { self.hasher.write(bytes) }
-
-    fn write_u8(&mut self, i: u8) { self.hasher.write_u8(i) }
-    fn write_u16(&mut self, i: u16) { self.hasher.write_u16(i) }
-    fn write_u32(&mut self, i: u32) { self.hasher.write_u32(i) }
-    fn write_u64(&mut self, i: u64) { self.hasher.write_u64(i) }
-    fn write_usize(&mut self, i: usize) { self.hasher.write_usize(i) }
-    fn write_i8(&mut self, i: i8) { self.hasher.write_i8(i) }
-    fn write_i16(&mut self, i: i16) { self.hasher.write_i16(i) }
-    fn write_i32(&mut self, i: i32) { self.hasher.write_i32(i) }
-    fn write_i64(&mut self, i: i64) { self.hasher.write_i64(i) }
-    fn write_isize(&mut self, i: isize) { self.hasher.write_isize(i) }
-}
-
-pub struct ModBuildHasher<S: BuildHasher = RandomState> {
-    hash_builder: S,
-    modulus: u64,
-}
-
-impl<S: BuildHasher + Default> ModBuildHasher<S> {
+impl<K, V, S> CollisionCache<K, V, S>
+    where K: Eq + Hash,
+          S: BuildHasher + Default
+{
     pub fn new(modulus: u64) -> Self {
-        ModBuildHasher {
-            hash_builder: S::default(),
+        CollisionCache {
+            map: HashMap::default(),
             modulus: modulus,
         }
     }
 }
 
-impl<S: BuildHasher> ModBuildHasher<S> {
-    pub fn with_modulus_and_hasher(modulus: u64, hash_builder: S) -> Self {
-        ModBuildHasher {
-            hash_builder: hash_builder,
+impl<K, V, S> CollisionCache<K, V, S>
+    where K: Eq + Hash,
+          S: BuildHasher
+{
+    pub fn with_hasher(modulus: u64, hash_builder: S) -> Self {
+        CollisionCache {
+            map: HashMap::with_hasher(hash_builder),
             modulus: modulus,
         }
     }
 }
 
-impl<S: BuildHasher> BuildHasher for ModBuildHasher<S> {
-    type Hasher = ModHasher<S::Hasher>;
-    fn build_hasher(&self) -> Self::Hasher {
-        ModHasher {
-            hasher: self.hash_builder.build_hasher(),
-            modulus: self.modulus,
+impl<K, V, S> Cache for CollisionCache<K, V, S>
+    where K: Eq + Hash,
+          S: BuildHasher
+{
+    type K = K;
+    type V = V;
+    fn store(&mut self, k: Self::K, v: Self::V) -> Result<&Self::V, Self::V> {
+        match self.map.entry(hash(&k) % self.modulus) {
+            Entry::Occupied(mut entry) => {
+                entry.insert((k, v));
+                Ok(&entry.into_mut().1)
+            }
+            Entry::Vacant(entry) => Ok(&entry.insert((k, v)).1),
+        }
+    }
+    fn fetch(&mut self, k: &Self::K) -> Option<&Self::V> {
+        self.map
+            .get(&(hash(&k) % self.modulus))
+            .and_then(|it| { if it.0 == *k { Some(&it.1) } else { None } })
+    }
+    fn contains(&mut self, k: &Self::K) -> bool {
+        match self.map.entry(hash(&k) % self.modulus) {
+            Entry::Occupied(mut entry) => entry.get().0 == *k,
+            Entry::Vacant(entry) => false,
+        }
+    }
+    fn remove(&mut self, k: &Self::K) -> Option<Self::V> {
+        match self.map.entry(hash(&k) % self.modulus) {
+            Entry::Occupied(mut entry) => {
+                if entry.get().0 == *k { Some(entry.remove().1) } else { None }
+            }
+            Entry::Vacant(entry) => None,
         }
     }
 }
-
-pub type CollisionCache<K, V, S = RandomState> = HashMap<K, V, ModBuildHasher<S>>;
 
 impl<K, V, S> Cache for GDSFCache<K, V, S>
     where K: Eq + Hash,

@@ -1,8 +1,7 @@
 mod query_builder;
 
 use NodeProvider;
-use cache::{Cache, CachedFetcher, CollisionCache, DummyCache, Fetcher, HitMissCounter,
-            ModBuildHasher};
+use cache::{Cache, CachedFetcher, CollisionCache, DummyCache, Fetcher, HitMissCounter};
 use cache::gds1_cache::GDS1Cache;
 use cache::gdsf_cache::{GDSFCache, HasCost, HasSize};
 use chrono::UTC;
@@ -292,9 +291,7 @@ fn make_cache(ty: CacheType,
     match ty {
         CacheType::Dummy => Arc::new(Mutex::new(DummyCache::default())),
         CacheType::Collision => {
-            let build_hasher: ModBuildHasher = ModBuildHasher::new(capacity as u64);
-            let cache = CollisionCache::with_capacity_and_hasher(capacity, build_hasher);
-            Arc::new(Mutex::new(cache))
+            Arc::new(Mutex::<CollisionCache<_, _>>::new(CollisionCache::new(capacity as u64)))
         }
         CacheType::Lru => Arc::new(Mutex::new(LruCache::new(capacity))),
         CacheType::LruSize => Arc::new(Mutex::new(LruSizeCache::new(capacity))),
