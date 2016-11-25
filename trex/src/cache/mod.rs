@@ -124,16 +124,19 @@ impl<C: ?Sized, F> CachedFetcher<C, F>
         let start = UTC::now();
         let mut cache = MutexGuardRefMut::new(self.cache.lock().unwrap());
         if cache.contains(key.borrow()) {
+            let res = FetchedValue::Cached(cache.map(|cache| cache.fetch(key.borrow()).unwrap())
+                .into());
             self.stat.hit(UTC::now() - start);
-            FetchedValue::Cached(cache.map(|cache| cache.fetch(key.borrow()).unwrap()).into())
+            res
         } else {
             drop(cache);
             let value = self.fetcher.fetch(key.borrow());
-            self.stat.miss(UTC::now() - start);
-            MutexGuardRefMut::new(self.cache.lock().unwrap())
+            let res = MutexGuardRefMut::new(self.cache.lock().unwrap())
                 .try_map(|cache| cache.store(key.into_owned(), value))
                 .map(FetchedValue::Cached)
-                .unwrap_or_else(FetchedValue::Uncached)
+                .unwrap_or_else(FetchedValue::Uncached);
+            self.stat.miss(UTC::now() - start);
+            res
         }
     }
 }
