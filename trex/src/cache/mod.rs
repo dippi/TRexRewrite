@@ -1,11 +1,13 @@
 pub mod ownable;
-pub mod gdfs_cache;
+pub mod gdsf_cache;
+pub mod gds1_cache;
 
 use chrono::{Duration, UTC};
 use lru_cache::LruCache;
 use lru_size_cache::{HasSize as LruHasSize, LruSizeCache};
 use owning_ref::{MutexGuardRef, MutexGuardRefMut};
-use self::gdfs_cache::{GDSFCache, HasCost, HasSize};
+use self::gds1_cache::GDS1Cache;
+use self::gdsf_cache::{GDSFCache, HasCost, HasSize};
 use self::ownable::Ownable;
 use std::borrow::Borrow;
 use std::collections::hash_map::{Entry, HashMap, RandomState};
@@ -275,4 +277,17 @@ impl<K, V, S> Cache for GDSFCache<K, V, S>
     fn fetch(&mut self, k: &Self::K) -> Option<&Self::V> { self.get(k) }
     fn contains(&mut self, k: &Self::K) -> bool { self.contains_key(k) }
     fn remove(&mut self, k: &Self::K) -> Option<Self::V> { GDSFCache::remove(self, k) }
+}
+
+impl<K, V, S> Cache for GDS1Cache<K, V, S>
+    where K: Eq + Hash,
+          V: HasSize + HasCost,
+          S: BuildHasher
+{
+    type K = K;
+    type V = V;
+    fn store(&mut self, k: Self::K, v: Self::V) -> Result<&Self::V, Self::V> { self.insert(k, v) }
+    fn fetch(&mut self, k: &Self::K) -> Option<&Self::V> { self.get(k) }
+    fn contains(&mut self, k: &Self::K) -> bool { self.contains_key(k) }
+    fn remove(&mut self, k: &Self::K) -> Option<Self::V> { GDS1Cache::remove(self, k) }
 }

@@ -451,7 +451,7 @@ fn main() {
         .arg(Arg::with_name("cache_type")
             .long("cache_type")
             .value_name("VAL")
-            .help("DUMMY|LRU|LRU_SIZE|COLLISION|GDSF")
+            .help("DUMMY|LRU|LRU_SIZE|COLLISION|GDSF|GDS1|PERFECT")
             .takes_value(true))
         .arg(Arg::with_name("query_distribution")
             .long("query_distribution")
@@ -516,6 +516,8 @@ fn main() {
                     "COLLISION" => CacheType::Collision,
                     "LRU_SIZE" => CacheType::LruSize,
                     "GDSF" => CacheType::Gdfs,
+                    "GDS1" => CacheType::Gdf1,
+                    "PERFECT" => CacheType::Perfect,
                     _ => panic!("Unexpected cache type"),
                 }
             })

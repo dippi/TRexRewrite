@@ -3,7 +3,8 @@ mod query_builder;
 use NodeProvider;
 use cache::{Cache, CachedFetcher, CollisionCache, DummyCache, Fetcher, HitMissCounter,
             ModBuildHasher};
-use cache::gdfs_cache::{GDSFCache, HasCost, HasSize};
+use cache::gds1_cache::GDS1Cache;
+use cache::gdsf_cache::{GDSFCache, HasCost, HasSize};
 use chrono::UTC;
 use expressions::evaluation::*;
 use linear_map::LinearMap;
@@ -15,6 +16,7 @@ use rule_processor::*;
 use rusqlite::Row;
 use rusqlite::types::{ToSql, Value as SqlValue};
 use self::query_builder::SqlContext;
+use std::collections::HashMap;
 use std::iter;
 use std::sync::{Arc, Mutex};
 use std::usize;
@@ -49,10 +51,8 @@ impl HasCost for CacheEntry {
 impl HasSize for CacheEntry {
     fn size(&self) -> usize {
         match self.value {
-            CacheEntryValue::Values(_, ref val) => val.len(),
-            CacheEntryValue::Aggr(..) => 1,
-            CacheEntryValue::Count(..) => 1,
-            CacheEntryValue::Exists(..) => 1,
+            CacheEntryValue::Values(_, ref val) => val.len() + 1,
+            _ => 1,
         }
     }
 }
@@ -273,6 +273,8 @@ pub enum CacheType {
     Lru,
     LruSize,
     Gdfs,
+    Gdf1,
+    Perfect,
 }
 
 #[derive(Debug, Clone)]
@@ -297,6 +299,8 @@ fn make_cache(ty: CacheType,
         CacheType::Lru => Arc::new(Mutex::new(LruCache::new(capacity))),
         CacheType::LruSize => Arc::new(Mutex::new(LruSizeCache::new(capacity))),
         CacheType::Gdfs => Arc::new(Mutex::<GDSFCache<_, _>>::new(GDSFCache::new(capacity))),
+        CacheType::Gdf1 => Arc::new(Mutex::<GDS1Cache<_, _>>::new(GDS1Cache::new(capacity))),
+        CacheType::Perfect => Arc::new(Mutex::new(HashMap::new())),
     }
 }
 
