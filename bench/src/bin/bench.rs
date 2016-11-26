@@ -223,15 +223,14 @@ fn main() {
         evts_per_sec: 10000,
     };
 
-    for queue_len in vec![100usize, 10_000_000] {
-        cfg.queue_len = queue_len;
+    for queue_bound in vec![true, false] {
         println!("");
-        println!("### Queue lenght: {:?} ###", queue_len);
         for freq in vec![600usize, 800, 1000, 1500, 2500, 4000] {
             cfg.num_events = freq * 60;
+            cfg.queue_len = if queue_bound { freq / 10 } else { cfg.num_events + 1 };
             cfg.evts_per_sec = freq;
             println!("");
-            println!("- Frequency: {:5} evt/sec", freq);
+            println!("- Frequency: {:5} evt/sec | Queue len: {:5}", freq, cfg.queue_len);
             for avg_win in (2...10).step_by(4) {
                 cfg.max_win = Duration::seconds(avg_win + 1 as i64);
                 cfg.min_win = Duration::seconds(avg_win - 1 as i64);

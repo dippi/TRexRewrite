@@ -180,11 +180,17 @@ fn generate_declarations<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<TupleDeclarat
                 ty: BasicType::Int,
             }
         })
-        .collect();
+        .collect::<Vec<_>>();
     let static_decl = TupleDeclaration {
         ty: TupleType::Static,
         id: 0,
         name: "test".to_owned(),
+        attributes: attributes.clone(),
+    };
+    let alternative_decl = TupleDeclaration {
+        ty: TupleType::Event,
+        id: (cfg.num_def + 1) * 1000,
+        name: "tail".to_owned(),
         attributes: attributes,
     };
     (0..cfg.num_def)
@@ -221,6 +227,7 @@ fn generate_declarations<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<TupleDeclarat
             once(output_decl).chain(mid_decls)
         })
         .chain(once(static_decl))
+        .chain(once(alternative_decl))
         .collect()
 }
 
@@ -285,7 +292,7 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
                         }
                     })
                     .collect();
-                Some(Predicate {
+                Predicate {
                     ty: PredicateType::UnorderedStatic { parameters: parameters },
                     tuple: ConstrainedTuple {
                         ty_id: 0,
@@ -295,9 +302,31 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
                             .collect(),
                         alias: format!("alias{}", 0),
                     },
-                })
+                }
             } else {
-                None
+                let parameters = (0..cfg.table_columns)
+                    .map(|j| {
+                        ParameterDeclaration {
+                            name: format!("param{}x{}", cfg.num_pred, j),
+                            expression: Arc::new(Expression::Reference { attribute: j }),
+                        }
+                    })
+                    .collect();
+                Predicate {
+                    ty: PredicateType::Event {
+                        selection: EventSelection::Each,
+                        parameters: parameters,
+                        timing: Timing {
+                            upper: 0,
+                            bound: TimingBound::Within { window: Duration::days(1000) },
+                        },
+                    },
+                    tuple: ConstrainedTuple {
+                        ty_id: (cfg.num_def + 1) * 1000,
+                        constraints: vec![],
+                        alias: "tail".to_owned(),
+                    },
+                }
             };
 
             let mid_preds = (1..cfg.num_pred).map(|j| {
@@ -338,7 +367,7 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
                 }
             });
 
-            let predicates = once(root_pred).chain(mid_preds).chain(static_pred).collect();
+            let predicates = once(root_pred).chain(mid_preds).chain(once(static_pred)).collect();
             let event_template = EventTemplate {
                 ty_id: id,
                 attributes: vec![
@@ -406,6 +435,17 @@ fn execute_bench<R: Rng>(rng: &mut R, cfg: &Config) {
     }
     for rule in rules {
         engine.define(rule);
+    }
+
+    let tail = Event {
+        tuple: Tuple {
+            ty_id: (cfg.num_def + 1) * 1000,
+            data: repeat(1.into()).take(cfg.table_columns).collect(),
+        },
+        time: UTC::now(),
+    };
+    for _ in 0..cfg.matching_rows {
+        engine.publish(&Arc::new(tail.clone()));
     }
 
     use trex::listeners::{CountListener, DebugListener};
