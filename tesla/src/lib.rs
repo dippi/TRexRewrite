@@ -55,42 +55,14 @@ pub struct Event {
     pub time: DateTime<UTC>,
 }
 
-pub trait ClonableIterator<'a>: Iterator {
-    fn clone_iter(&self) -> Box<ClonableIterator<'a, Item = Self::Item> + 'a>;
-}
-
-impl<'a, T> ClonableIterator<'a> for T
-    where T: Iterator + Clone + 'a
-{
-    fn clone_iter(&self) -> Box<ClonableIterator<'a, Item = Self::Item> + 'a> {
-        Box::new(self.clone())
-    }
-}
-
-impl<'a, T: 'a> Clone for Box<ClonableIterator<'a, Item = T> + 'a> {
-    fn clone(&self) -> Self { (**self).clone_iter() }
-}
-
-pub type EventsIterator<'a> = Box<ClonableIterator<'a, Item = &'a Arc<Event>> + 'a>;
-
 pub trait Listener {
     fn receive(&mut self, event: &Arc<Event>);
-    fn receive_all(&mut self, events: EventsIterator) {
-        for event in events {
-            self.receive(event);
-        }
-    }
 }
 
 pub trait Engine {
     fn declare(&mut self, tuple: TupleDeclaration);
     fn define(&mut self, rule: Rule);
     fn publish(&mut self, event: &Arc<Event>);
-    fn publish_all(&mut self, events: EventsIterator) {
-        for event in events {
-            self.publish(event);
-        }
-    }
     fn subscribe(&mut self, listener: Box<Listener>) -> usize;
     fn unsubscribe(&mut self, listener_id: &usize) -> Option<Box<Listener>>;
 }
