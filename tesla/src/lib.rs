@@ -55,6 +55,13 @@ pub struct Event {
     pub time: DateTime<UTC>,
 }
 
+#[derive(Clone, Debug)]
+pub enum SubscrFilter {
+    Any,
+    Topic { ty: usize },
+    Content { ty: usize, filters: Vec<Expression> },
+}
+
 pub trait Listener {
     fn receive(&mut self, event: &Arc<Event>);
 }
@@ -63,6 +70,6 @@ pub trait Engine {
     fn declare(&mut self, tuple: TupleDeclaration);
     fn define(&mut self, rule: Rule);
     fn publish(&mut self, event: &Arc<Event>);
-    fn subscribe(&mut self, listener: Box<Listener>) -> usize;
-    fn unsubscribe(&mut self, listener_id: &usize) -> Option<Box<Listener>>;
+    fn subscribe(&mut self, condition: SubscrFilter, listener: Box<Listener>) -> usize;
+    fn unsubscribe(&mut self, listener_id: usize);
 }
