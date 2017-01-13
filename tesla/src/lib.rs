@@ -38,7 +38,7 @@ pub struct EventTemplate {
 #[derive(Clone, Debug)]
 pub struct Rule {
     pub predicates: Vec<Predicate>,
-    pub filters: Vec<Arc<Expression>>,
+    pub filters: Vec<Expression>,
     pub event_template: EventTemplate,
     pub consuming: Vec<usize>,
 }
