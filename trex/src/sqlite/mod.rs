@@ -220,8 +220,8 @@ fn to_sql_ref(value: &SqlValue) -> &ToSql {
 
 fn get_res(row: &Row, i: i32, ty: &BasicType) -> Value {
     match *ty {
-        BasicType::Int => Value::Int(row.get::<_, i64>(i) as i32),
-        BasicType::Float => Value::Float(row.get::<_, f64>(i) as f32),
+        BasicType::Int => Value::Int(row.get::<_, i64>(i)),
+        BasicType::Float => Value::Float(row.get::<_, f64>(i)),
         BasicType::Bool => Value::Bool(row.get::<_, i64>(i) != 0),
         BasicType::Str => Value::Str(row.get(i)),
     }
