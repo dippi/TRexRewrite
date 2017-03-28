@@ -29,7 +29,7 @@ use trex::stack::StackProvider;
 enum QueryDistribution {
     Normal(Normal),
     Exp(Exp),
-    Uniform(Range<i32>),
+    Uniform(Range<i64>),
 }
 
 impl fmt::Debug for QueryDistribution {
@@ -42,21 +42,17 @@ impl fmt::Debug for QueryDistribution {
     }
 }
 
-impl Sample<i32> for QueryDistribution {
-    fn sample<R: Rng>(&mut self, rng: &mut R) -> i32 {
-        match *self {
-            QueryDistribution::Normal(ref mut distr) => distr.sample(rng) as i32,
-            QueryDistribution::Exp(ref mut distr) => distr.sample(rng) as i32,
-            QueryDistribution::Uniform(ref mut distr) => distr.sample(rng),
-        }
+impl Sample<i64> for QueryDistribution {
+    fn sample<R: Rng>(&mut self, rng: &mut R) -> i64 {
+        self.ind_sample(rng)
     }
 }
 
-impl IndependentSample<i32> for QueryDistribution {
-    fn ind_sample<R: Rng>(&self, rng: &mut R) -> i32 {
+impl IndependentSample<i64> for QueryDistribution {
+    fn ind_sample<R: Rng>(&self, rng: &mut R) -> i64 {
         match *self {
-            QueryDistribution::Normal(ref distr) => distr.ind_sample(rng) as i32,
-            QueryDistribution::Exp(ref distr) => distr.ind_sample(rng) as i32,
+            QueryDistribution::Normal(ref distr) => distr.ind_sample(rng) as i64,
+            QueryDistribution::Exp(ref distr) => distr.ind_sample(rng) as i64,
             QueryDistribution::Uniform(ref distr) => distr.ind_sample(rng),
         }
     }
@@ -91,11 +87,11 @@ struct Config {
 }
 
 fn db_equivalent<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Event> {
-    let n_rows = cfg.table_rows;
+    let n_rows = cfg.table_rows as i64;
     (0..n_rows)
         .map(|i| {
-            let data = once(i as i32)
-                .chain(repeat(rng.gen_range(-1 * n_rows as i32 / 2, n_rows as i32 / 2))
+            let data = once(i)
+                .chain(repeat(rng.gen_range(-1 * n_rows / 2, n_rows / 2))
                     .take(cfg.table_columns))
                 .map(From::from)
                 .collect();
@@ -313,7 +309,7 @@ fn generate_events<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Event> {
             let random = cfg.query_distribution.ind_sample(rng);
             let upper_bound = if state == (cfg.num_pred - 1) {
                 let mut pseudo_rng = StdRng::from_seed(&[random as usize]);
-                Some(random + pseudo_rng.gen_range(3, cfg.matching_rows as i32 * 2))
+                Some(random + pseudo_rng.gen_range(3, cfg.matching_rows as i64 * 2))
             } else {
                 None
             };
@@ -531,8 +527,8 @@ fn main() {
                     "Normal" => QueryDistribution::Normal(Normal::new(0.0, par)),
                     "Exp" => QueryDistribution::Exp(Exp::new(par)),
                     "Uniform" => {
-                        QueryDistribution::Uniform(Range::new((-par / 2.0) as i32,
-                                                              (par / 2.0) as i32))
+                        QueryDistribution::Uniform(Range::new((-par / 2.0) as i64,
+                                                              (par / 2.0) as i64))
                     }
                     _ => panic!("Unexpected distribution type"),
                 }
