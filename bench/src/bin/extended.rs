@@ -231,18 +231,18 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
     (0..cfg.num_rules)
         .map(|i| {
             let id = i % cfg.num_def + 1;
-            let constraint = Arc::new(Expression::BinaryOperation {
+            let constraint = Expression::BinaryOperation {
                 operator: BinaryOperator::Equal,
                 left: Box::new(Expression::Reference { attribute: 0 }),
                 right: Box::new(Expression::Immediate { value: 1.into() }),
-            });
+            };
 
             let root_pred = Predicate {
                 ty: PredicateType::Trigger {
                     parameters: vec![
                         ParameterDeclaration {
                             name: "param0x1".to_owned(),
-                            expression: Arc::new(Expression::Reference { attribute: 1 }),
+                            expression: Expression::Reference { attribute: 1 },
                         },
                     ],
                 },
@@ -254,37 +254,37 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
             };
 
             let static_pred = if rng.next_f32() <= cfg.static_prob {
-                let static_constr1 = Arc::new(Expression::BinaryOperation {
+                let static_constr1 = Expression::BinaryOperation {
                     operator: BinaryOperator::GreaterEqual,
                     left: Box::new(Expression::Reference { attribute: 0 }),
                     right: Box::new(Expression::Parameter {
                         predicate: cfg.num_pred - 1,
                         parameter: 0,
                     }),
-                });
-                let static_constr2 = Arc::new(Expression::BinaryOperation {
+                };
+                let static_constr2 = Expression::BinaryOperation {
                     operator: BinaryOperator::LowerThan,
                     left: Box::new(Expression::Reference { attribute: 0 }),
                     right: Box::new(Expression::Parameter {
                         predicate: cfg.num_pred - 1,
                         parameter: 1,
                     }),
-                });
+                };
                 let other_constr = (1..cfg.query_dependencies).map(|j| {
-                    Arc::new(Expression::BinaryOperation {
+                    Expression::BinaryOperation {
                         operator: BinaryOperator::LowerThan,
                         left: Box::new(Expression::Parameter {
                             predicate: cfg.num_pred - 1 - j,
                             parameter: 0,
                         }),
                         right: Box::new(Expression::Immediate { value: 1_000_000_000.into() }),
-                    })
+                    }
                 });
                 let parameters = (0..cfg.table_columns)
                     .map(|j| {
                         ParameterDeclaration {
                             name: format!("param{}x{}", cfg.num_pred, j),
-                            expression: Arc::new(Expression::Reference { attribute: j }),
+                            expression: Expression::Reference { attribute: j },
                         }
                     })
                     .collect();
@@ -304,7 +304,7 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
                     .map(|j| {
                         ParameterDeclaration {
                             name: format!("param{}x{}", cfg.num_pred, j),
-                            expression: Arc::new(Expression::Reference { attribute: j }),
+                            expression: Expression::Reference { attribute: j },
                         }
                     })
                     .collect();
@@ -345,7 +345,7 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
                     .map(|k| {
                         ParameterDeclaration {
                             name: format!("param{}x{}", j, k),
-                            expression: Arc::new(Expression::Reference { attribute: k + 1 }),
+                            expression: Expression::Reference { attribute: k + 1 },
                         }
                     })
                     .collect();

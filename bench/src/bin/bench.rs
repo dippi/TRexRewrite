@@ -62,11 +62,11 @@ fn generate_length_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
     let mut rules = Vec::new();
     for i in 0..cfg.num_rules {
         let id = i % cfg.num_def + 1;
-        let constraint = Arc::new(Expression::BinaryOperation {
+        let constraint = Expression::BinaryOperation {
             operator: BinaryOperator::Equal,
             left: Box::new(Expression::Reference { attribute: 0 }),
             right: Box::new(Expression::Immediate { value: 1.into() }),
-        });
+        };
         let root_pred = Predicate {
             ty: PredicateType::Trigger { parameters: Vec::new() },
             tuple: ConstrainedTuple {
