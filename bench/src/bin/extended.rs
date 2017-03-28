@@ -56,8 +56,8 @@ use std::ops::Add;
 use std::sync::Arc;
 use std::sync::mpsc::sync_channel;
 use std::thread;
-use tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Rule, Tuple, TupleDeclaration,
-            TupleType};
+use tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Rule, SubscrFilter, Tuple,
+            TupleDeclaration, TupleType};
 use tesla::expressions::*;
 use tesla::predicates::*;
 use trex::*;
@@ -446,7 +446,7 @@ fn execute_bench<R: Rng>(rng: &mut R, cfg: &Config) {
 
     use trex::listeners::{CountListener, DebugListener};
     // engine.subscribe(Box::new(DebugListener));
-    engine.subscribe(Box::new(CountListener {
+    engine.subscribe(SubscrFilter::Any, Box::new(CountListener {
         count: 0,
         duration: cfg.num_events / cfg.evts_per_sec,
     }));

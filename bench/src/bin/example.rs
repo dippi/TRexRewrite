@@ -5,8 +5,8 @@ extern crate trex;
 
 use chrono::{Duration, UTC};
 use std::sync::Arc;
-use tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Rule, Tuple, TupleDeclaration,
-            TupleType};
+use tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Rule, SubscrFilter, Tuple,
+            TupleDeclaration, TupleType};
 use tesla::expressions::{BasicType, BinaryOperator, Expression, Value};
 use tesla::predicates::{ConstrainedTuple, EventSelection, ParameterDeclaration, Predicate,
                         PredicateType, Timing, TimingBound};
@@ -164,7 +164,7 @@ fn main() {
 
     // We subscribe a listener to receive every event,
     // the `DebugListener` prints to stdout each event.
-    engine.subscribe(Box::new(DebugListener));
+    engine.subscribe(SubscrFilter::Any, Box::new(DebugListener));
 
     // Now we publish a sequence of Events
     //

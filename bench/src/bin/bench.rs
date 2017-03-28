@@ -11,8 +11,8 @@ use rand::Rng;
 use std::sync::Arc;
 use std::sync::mpsc::sync_channel;
 use std::thread;
-use tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Listener, Rule, Tuple,
-            TupleDeclaration, TupleType};
+use tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Listener, Rule, SubscrFilter,
+            Tuple, TupleDeclaration, TupleType};
 use tesla::expressions::*;
 use tesla::predicates::*;
 use trex::*;
@@ -179,10 +179,11 @@ fn execute_bench_length(cfg: &Config) {
         engine.define(rule);
     }
     // engine.subscribe(Box::new(DebugListener));
-    engine.subscribe(Box::new(CountListener {
-        count: 0,
-        duration: cfg.num_events / cfg.evts_per_sec,
-    }));
+    engine.subscribe(SubscrFilter::Any,
+                     Box::new(CountListener {
+                         count: 0,
+                         duration: cfg.num_events / cfg.evts_per_sec,
+                     }));
 
     let start = UTC::now();
 
