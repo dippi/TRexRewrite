@@ -56,8 +56,8 @@ use std::ops::Add;
 use std::sync::Arc;
 use std::sync::mpsc::sync_channel;
 use std::thread;
-use tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Rule, Tuple, TupleDeclaration,
-            TupleType};
+use tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Rule, SubscrFilter, Tuple,
+            TupleDeclaration, TupleType};
 use tesla::expressions::*;
 use tesla::predicates::*;
 use trex::*;
@@ -67,7 +67,7 @@ use trex::stack::StackProvider;
 enum QueryDistribution {
     Normal(Normal),
     Exp(Exp),
-    Uniform(Range<i32>),
+    Uniform(Range<i64>),
 }
 
 impl fmt::Debug for QueryDistribution {
@@ -80,21 +80,17 @@ impl fmt::Debug for QueryDistribution {
     }
 }
 
-impl Sample<i32> for QueryDistribution {
-    fn sample<R: Rng>(&mut self, rng: &mut R) -> i32 {
-        match *self {
-            QueryDistribution::Normal(ref mut distr) => distr.sample(rng) as i32,
-            QueryDistribution::Exp(ref mut distr) => distr.sample(rng) as i32,
-            QueryDistribution::Uniform(ref mut distr) => distr.sample(rng),
-        }
+impl Sample<i64> for QueryDistribution {
+    fn sample<R: Rng>(&mut self, rng: &mut R) -> i64 {
+        self.ind_sample(rng)
     }
 }
 
-impl IndependentSample<i32> for QueryDistribution {
-    fn ind_sample<R: Rng>(&self, rng: &mut R) -> i32 {
+impl IndependentSample<i64> for QueryDistribution {
+    fn ind_sample<R: Rng>(&self, rng: &mut R) -> i64 {
         match *self {
-            QueryDistribution::Normal(ref distr) => distr.ind_sample(rng) as i32,
-            QueryDistribution::Exp(ref distr) => distr.ind_sample(rng) as i32,
+            QueryDistribution::Normal(ref distr) => distr.ind_sample(rng) as i64,
+            QueryDistribution::Exp(ref distr) => distr.ind_sample(rng) as i64,
             QueryDistribution::Uniform(ref distr) => distr.ind_sample(rng),
         }
     }
@@ -235,18 +231,18 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
     (0..cfg.num_rules)
         .map(|i| {
             let id = i % cfg.num_def + 1;
-            let constraint = Arc::new(Expression::BinaryOperation {
+            let constraint = Expression::BinaryOperation {
                 operator: BinaryOperator::Equal,
                 left: Box::new(Expression::Reference { attribute: 0 }),
                 right: Box::new(Expression::Immediate { value: 1.into() }),
-            });
+            };
 
             let root_pred = Predicate {
                 ty: PredicateType::Trigger {
                     parameters: vec![
                         ParameterDeclaration {
                             name: "param0x1".to_owned(),
-                            expression: Arc::new(Expression::Reference { attribute: 1 }),
+                            expression: Expression::Reference { attribute: 1 },
                         },
                     ],
                 },
@@ -258,37 +254,37 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
             };
 
             let static_pred = if rng.next_f32() <= cfg.static_prob {
-                let static_constr1 = Arc::new(Expression::BinaryOperation {
+                let static_constr1 = Expression::BinaryOperation {
                     operator: BinaryOperator::GreaterEqual,
                     left: Box::new(Expression::Reference { attribute: 0 }),
                     right: Box::new(Expression::Parameter {
                         predicate: cfg.num_pred - 1,
                         parameter: 0,
                     }),
-                });
-                let static_constr2 = Arc::new(Expression::BinaryOperation {
+                };
+                let static_constr2 = Expression::BinaryOperation {
                     operator: BinaryOperator::LowerThan,
                     left: Box::new(Expression::Reference { attribute: 0 }),
                     right: Box::new(Expression::Parameter {
                         predicate: cfg.num_pred - 1,
                         parameter: 1,
                     }),
-                });
+                };
                 let other_constr = (1..cfg.query_dependencies).map(|j| {
-                    Arc::new(Expression::BinaryOperation {
+                    Expression::BinaryOperation {
                         operator: BinaryOperator::LowerThan,
                         left: Box::new(Expression::Parameter {
                             predicate: cfg.num_pred - 1 - j,
                             parameter: 0,
                         }),
                         right: Box::new(Expression::Immediate { value: 1_000_000_000.into() }),
-                    })
+                    }
                 });
                 let parameters = (0..cfg.table_columns)
                     .map(|j| {
                         ParameterDeclaration {
                             name: format!("param{}x{}", cfg.num_pred, j),
-                            expression: Arc::new(Expression::Reference { attribute: j }),
+                            expression: Expression::Reference { attribute: j },
                         }
                     })
                     .collect();
@@ -308,7 +304,7 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
                     .map(|j| {
                         ParameterDeclaration {
                             name: format!("param{}x{}", cfg.num_pred, j),
-                            expression: Arc::new(Expression::Reference { attribute: j }),
+                            expression: Expression::Reference { attribute: j },
                         }
                     })
                     .collect();
@@ -349,7 +345,7 @@ fn generate_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
                     .map(|k| {
                         ParameterDeclaration {
                             name: format!("param{}x{}", j, k),
-                            expression: Arc::new(Expression::Reference { attribute: k + 1 }),
+                            expression: Expression::Reference { attribute: k + 1 },
                         }
                     })
                     .collect();
@@ -397,7 +393,7 @@ fn generate_events<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Event> {
             let random = cfg.query_distribution.ind_sample(rng);
             let upper_bound = if state == (cfg.num_pred - 1) {
                 let mut pseudo_rng = StdRng::from_seed(&[random as usize]);
-                Some(random + pseudo_rng.gen_range(3, cfg.matching_rows as i32 * 2))
+                Some(random + pseudo_rng.gen_range(3, cfg.matching_rows as i64 * 2))
             } else {
                 None
             };
@@ -450,7 +446,7 @@ fn execute_bench<R: Rng>(rng: &mut R, cfg: &Config) {
 
     use trex::listeners::{CountListener, DebugListener};
     // engine.subscribe(Box::new(DebugListener));
-    engine.subscribe(Box::new(CountListener {
+    engine.subscribe(SubscrFilter::Any, Box::new(CountListener {
         count: 0,
         duration: cfg.num_events / cfg.evts_per_sec,
     }));
@@ -632,8 +628,8 @@ fn main() {
                     "Normal" => QueryDistribution::Normal(Normal::new(0.0, par)),
                     "Exp" => QueryDistribution::Exp(Exp::new(par)),
                     "Uniform" => {
-                        QueryDistribution::Uniform(Range::new((-par / 2.0) as i32,
-                                                              (par / 2.0) as i32))
+                        QueryDistribution::Uniform(Range::new((-par / 2.0) as i64,
+                                                              (par / 2.0) as i64))
                     }
                     _ => panic!("Unexpected distribution type"),
                 }

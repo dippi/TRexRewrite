@@ -11,8 +11,8 @@ use rand::Rng;
 use std::sync::Arc;
 use std::sync::mpsc::sync_channel;
 use std::thread;
-use tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Listener, Rule, Tuple,
-            TupleDeclaration, TupleType};
+use tesla::{AttributeDeclaration, Engine, Event, EventTemplate, Listener, Rule, SubscrFilter,
+            Tuple, TupleDeclaration, TupleType};
 use tesla::expressions::*;
 use tesla::predicates::*;
 use trex::*;
@@ -62,11 +62,11 @@ fn generate_length_rules<R: Rng>(rng: &mut R, cfg: &Config) -> Vec<Rule> {
     let mut rules = Vec::new();
     for i in 0..cfg.num_rules {
         let id = i % cfg.num_def + 1;
-        let constraint = Arc::new(Expression::BinaryOperation {
+        let constraint = Expression::BinaryOperation {
             operator: BinaryOperator::Equal,
             left: Box::new(Expression::Reference { attribute: 0 }),
             right: Box::new(Expression::Immediate { value: 1.into() }),
-        });
+        };
         let root_pred = Predicate {
             ty: PredicateType::Trigger { parameters: Vec::new() },
             tuple: ConstrainedTuple {
@@ -179,10 +179,11 @@ fn execute_bench_length(cfg: &Config) {
         engine.define(rule);
     }
     // engine.subscribe(Box::new(DebugListener));
-    engine.subscribe(Box::new(CountListener {
-        count: 0,
-        duration: cfg.num_events / cfg.evts_per_sec,
-    }));
+    engine.subscribe(SubscrFilter::Any,
+                     Box::new(CountListener {
+                         count: 0,
+                         duration: cfg.num_events / cfg.evts_per_sec,
+                     }));
 
     let start = UTC::now();
 
