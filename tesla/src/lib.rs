@@ -1,10 +1,46 @@
 #![warn(missing_docs)]
-// TODO general intro to the project
 
-//! This crate contains the structs of the TESLA rule definition language AST
-//! and the traits which describe the public API of a compatible CEP engine.
-
+//! ## TESLA language
+//!
+//! *TESLA*[^1] is a declarative strongly typed *Complex Event Processing* (CEP) rule definition language.
+//!
+//! It provides a comprehensive set of common operations on events (like filtering and
+//! parameterization, composition and pattern detection, negation and aggregation) and allows
+//! to control selection policies, time windows and event consumption.
+//!
+//! However, while the other alternative languages rely on informal documentation that leaves room
+//! to ambiguities, TESLA’s unprecedented characteristic is its aim to a complete semantic
+//! specification with *TRIO*[^2], a first order temporal logic.
+//! The definition of a precise behavior for each feature improves coherence in the development
+//! of engines based on TESLA and helps users to understand the language deeply with less
+//! empirical research.
+//!
+//! This crate is part of the code developed for my thesis[^3], that includes some modification
+//! and refinement of the original syntax and semantic, plus a native and general purpose
+//! integration of static data sources.
+//!
+// TODO Add links to pdf files
+//!
+//! [^1]: Gianpaolo Cugola and Alessandro Margara.
+//!       "TESLA: a formally defined event specification language".
+//!       In: Proceedings of the Fourth ACM International Conference
+//!       on Distributed Event-Based Systems. ACM. 2010, pp. 50–61.
+//!
+//! [^2]: Carlo Ghezzi, Dino Mandrioli, and Angelo Morzenti.
+//!       "TRIO: A logic language for executable specifications of real-time systems".
+//!       In: Journal of Systems and software 12.2 (1990), pp. 107– 123.
+//!
+//! [^3]: Angelo Di Pilla with the supervision of Gianpaolo Cugola and Alessandro Margara
+//!       "Combining streaming events with static data in the Complex Event Processing tool T-Rex".
+//!       Thesis of master degree in Computer Science and Engineering
+//!       at the Polytechnic University of Milan (2016).
+//!
+// TODO think if it's worth it to transcribe some of the info about the language from the papers
 // TODO thorough explanation of the crate with meaningful examples
+//! ## Content of the crate
+//!
+//! This crate contains the structs that compose the TESLA abstract syntax tree (AST)
+//! and the traits that describe the public API of a compatible CEP engine implementation.
 
 extern crate chrono;
 extern crate ordered_float;
